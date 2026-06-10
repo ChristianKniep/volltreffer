@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, db, providers, resolve as R, updater as U
+from . import auth, db, providers, resolve as R, score as SC, updater as U
 from .predict import predict, rationale
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
@@ -117,6 +117,68 @@ def _active_provider(conn, user_id, requested=None):
         "SELECT provider_id FROM tips WHERE user_id=? ORDER BY provider_id LIMIT 1",
         (user_id,)).fetchone()
     return row["provider_id"] if row else None
+
+
+# ---------- leaderboard / pool helpers ----------
+def _kickoff_utc(kickoff_et):
+    """Fixtures store US-Eastern wall-clock (EDT = UTC-4) for the whole window."""
+    et = datetime.datetime.strptime(kickoff_et, "%Y-%m-%d %H:%M")
+    return et + datetime.timedelta(hours=4)
+
+
+def _approved_usernames(conn):
+    return {r["id"]: r["username"]
+            for r in conn.execute("SELECT id,username FROM users WHERE approved=1")}
+
+
+def _user_match_tips(conn):
+    """{user_id: {match_id: (home, away)}}, one tip per user+match (latest wins
+    if the user has tips from several providers)."""
+    latest = {}   # (uid, mid) -> (updated_at, home, away)
+    for r in conn.execute("SELECT user_id,match_id,home,away,updated_at FROM tips"):
+        key = (r["user_id"], r["match_id"])
+        ts = r["updated_at"] or ""
+        if key not in latest or ts >= latest[key][0]:
+            latest[key] = (ts, r["home"], r["away"])
+    out = {}
+    for (uid, mid), (_, h, a) in latest.items():
+        out.setdefault(uid, {})[mid] = (h, a)
+    return out
+
+
+def _finished_results(conn):
+    return {m["id"]: (m["home_score"], m["away_score"])
+            for m in conn.execute(
+                "SELECT id,home_score,away_score FROM matches WHERE status='finished'")}
+
+
+def _leaderboard(conn, me_id):
+    names = _approved_usernames(conn)
+    results = _finished_results(conn)
+    tips = _user_match_tips(conn)
+    rows = []
+    for uid, username in names.items():
+        agg = {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0, "miss": 0, "tips": 0}
+        for mid, (th, ta) in tips.get(uid, {}).items():
+            if mid not in results:
+                continue
+            cls = SC.classify(th, ta, *results[mid])
+            agg[cls] += 1
+            agg["points"] += SC.POINTS[cls]
+            agg["tips"] += 1
+        rows.append({"user_id": uid, "username": username, "is_self": uid == me_id, **agg})
+    rows.sort(key=lambda r: (-r["points"], -r["exact"], -r["goaldiff"],
+                             -r["tendency"], r["username"].lower()))
+    # standard competition ranking (ties share a rank)
+    rank = 0
+    prev = None
+    for i, r in enumerate(rows, 1):
+        keyv = (r["points"], r["exact"], r["goaldiff"], r["tendency"])
+        if keyv != prev:
+            rank = i
+            prev = keyv
+        r["rank"] = rank
+    return rows
 
 
 # ---------- state ----------
@@ -417,6 +479,58 @@ def api_state(provider: str | None = None, user=Depends(auth.current_user)):
     finally:
         conn.close()
     return _state(user["id"], active)
+
+
+# ---------- routes: leaderboard / pool ----------
+@app.get("/api/leaderboard")
+def api_leaderboard(user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        rows = _leaderboard(conn, user["id"])
+        finished = conn.execute(
+            "SELECT COUNT(*) c FROM matches WHERE status='finished'").fetchone()["c"]
+    finally:
+        conn.close()
+    return {"scheme": SC.scheme(), "scored_matches": finished, "standings": rows}
+
+
+@app.get("/api/match/{mid}/tips")
+def api_match_tips(mid: str, user=Depends(auth.current_user)):
+    """All players' tips for one game. Revealed only once kickoff has passed, so
+    nobody can peek at others' predictions beforehand."""
+    conn = db.connect()
+    try:
+        m = conn.execute(
+            "SELECT id,kickoff_et,status,home_score,away_score FROM matches WHERE id=?",
+            (mid,)).fetchone()
+        if not m:
+            raise HTTPException(404, "match not found")
+        finished = m["status"] == "finished"
+        revealed = finished or datetime.datetime.utcnow() >= _kickoff_utc(m["kickoff_et"])
+        if not revealed:
+            return {"revealed": False, "finished": False, "tips": []}
+        names = _approved_usernames(conn)
+        tips = _user_match_tips(conn)
+        res = (m["home_score"], m["away_score"]) if finished else None
+        out = []
+        for uid, username in names.items():
+            t = tips.get(uid, {}).get(mid)
+            if not t:
+                continue
+            entry = {"username": username, "home": t[0], "away": t[1],
+                     "is_self": uid == user["id"]}
+            if finished:
+                cls = SC.classify(t[0], t[1], *res)
+                entry["points"] = SC.POINTS[cls]
+                entry["outcome"] = cls
+            out.append(entry)
+    finally:
+        conn.close()
+    if finished:
+        out.sort(key=lambda e: (-e["points"], e["username"].lower()))
+    else:
+        out.sort(key=lambda e: e["username"].lower())
+    return {"revealed": True, "finished": finished, "tips": out, "scheme": SC.scheme()}
 
 
 # ---------- routes: results & tips ----------

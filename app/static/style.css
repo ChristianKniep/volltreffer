@@ -316,4 +316,41 @@ table.tbl td.pts{font-weight:700}
 .uacts .btn{padding:5px 11px; font-size:13px}
 .uacts .self{font-size:12px; color:var(--muted); font-style:italic}
 
+/* ---------- leaderboard ---------- */
+.lblegend{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px}
+.lbchip{font-family:'Saira Condensed',sans-serif; font-size:12px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--ink2); background:var(--tile); border:1px solid var(--line);
+  border-radius:999px; padding:3px 10px}
+.lbchip b{color:var(--ink); margin-left:3px}
+.lbchip.exact{border-color:var(--good)} .lbchip.gd{border-color:#e0561f} .lbchip.tend{border-color:#c7a63c}
+.lbmeta{font-family:'Saira Condensed',sans-serif; font-size:12px; color:var(--muted); margin-left:auto}
+.lbtbl{width:100%; border-collapse:collapse; font-size:14px}
+.lbtbl th{font-family:'Saira Condensed',sans-serif; font-size:11px; text-transform:uppercase;
+  letter-spacing:.05em; color:var(--muted); text-align:right; padding:6px 8px; border-bottom:2px solid var(--ink)}
+.lbtbl th:nth-child(2){text-align:left}
+.lbtbl td{padding:8px; border-bottom:1px solid var(--line); text-align:right; font-variant-numeric:tabular-nums}
+.lbtbl td.rk{color:var(--muted); width:34px}
+.lbtbl td.pl{text-align:left; font-weight:600}
+.lbtbl td.pts{font-weight:800; color:var(--accent)}
+.lbtbl td.tn{color:var(--muted)}
+.lbtbl tr.self{background:rgba(200,16,46,.07)}
+.youtag{font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#fff;
+  background:var(--accent); border-radius:999px; padding:1px 6px; margin-left:6px}
+
+/* ---------- per-game tips popover ---------- */
+.tippop{position:fixed; z-index:60; pointer-events:none; min-width:170px; max-width:240px;
+  background:var(--ink); color:#F4EFE1; border-radius:9px; padding:7px 0; box-shadow:0 8px 26px rgba(20,15,8,.4);
+  font-size:13px}
+.tippop .pophead{font-family:'Saira Condensed',sans-serif; font-size:11px; text-transform:uppercase;
+  letter-spacing:.05em; color:#cdbfa6; padding:2px 12px 6px; border-bottom:1px solid rgba(255,255,255,.12); margin-bottom:4px}
+.tippop .poprow{display:flex; align-items:center; gap:8px; padding:3px 12px}
+.tippop .poprow.muted{color:#b3a892; font-style:italic}
+.tippop .poprow.self{background:rgba(255,255,255,.10)}
+.tippop .popname{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.tippop .popscore{font-variant-numeric:tabular-nums; font-weight:700}
+.tippop .poppts{font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:12px; min-width:18px;
+  text-align:center; border-radius:5px; padding:0 5px; color:#fff}
+.tippop .poppts.exact{background:var(--good)} .tippop .poppts.goaldiff{background:#e0561f}
+.tippop .poppts.tendency{background:#c7a63c} .tippop .poppts.miss{background:#6b6256}
+
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

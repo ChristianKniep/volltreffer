@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v11";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v12";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -16,6 +16,8 @@ async function getState(){
   STATE = await r.json();
   ACTIVE_PROVIDER = STATE.meta.active_provider || "";
   renderAll();
+  for(const k in TIP_CACHE) delete TIP_CACHE[k];   // results/tips changed → re-fetch on next hover
+  loadLeaderboard();
 }
 async function postResult(id, body){
   const r = await fetch(`/api/match/${id}/result`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -489,6 +491,88 @@ async function adminAction(url, opts, okMsg){
   await loadAdmin();
 }
 
+/* ---------- leaderboard ---------- */
+async function loadLeaderboard(){
+  const r = await fetch("/api/leaderboard");
+  if(!r.ok) return;
+  const d = await r.json();
+  const s = d.scheme;
+  document.getElementById("lbLegend").innerHTML =
+    `<span class="lbchip exact">Exact <b>${s.exact}</b></span>
+     <span class="lbchip gd">Goal diff <b>${s.goaldiff}</b></span>
+     <span class="lbchip tend">Tendency <b>${s.tendency}</b></span>
+     <span class="lbmeta">${d.scored_matches} match${d.scored_matches===1?"":"es"} scored</span>`;
+  if(!d.standings.length){ document.getElementById("lbTable").innerHTML = `<p class="note">No players yet.</p>`; return; }
+  const rows = d.standings.map(p=>`
+    <tr class="${p.is_self?'self':''}">
+      <td class="rk">${p.rank}</td>
+      <td class="pl">${fmtEl(p.username)}${p.is_self?' <span class="youtag">you</span>':''}</td>
+      <td class="pts">${p.points}</td>
+      <td>${p.exact}</td><td>${p.goaldiff}</td><td>${p.tendency}</td><td>${p.miss}</td>
+      <td class="tn">${p.tips}</td>
+    </tr>`).join("");
+  document.getElementById("lbTable").innerHTML = `
+    <table class="lbtbl">
+      <thead><tr><th>#</th><th>Player</th><th title="Total points">Pts</th>
+        <th title="Exact scores">E</th><th title="Correct goal difference">GD</th>
+        <th title="Correct tendency">T</th><th title="Missed">✗</th>
+        <th title="Tips on played matches">n</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+}
+
+/* ---------- per-game tips hover popover ---------- */
+const TIP_CACHE = {};
+let POP_FOR = null;
+function popEl(){ return document.getElementById("tipPop"); }
+async function tipsFor(id){
+  if(!TIP_CACHE[id]) TIP_CACHE[id] = fetch(`/api/match/${id}/tips`).then(r=>r.ok?r.json():null).catch(()=>null);
+  return TIP_CACHE[id];
+}
+function renderPop(d){
+  if(!d) return `<div class="poprow muted">Couldn't load tips.</div>`;
+  if(!d.revealed) return `<div class="pophead">Everyone's tips</div><div class="poprow muted">Hidden until kickoff</div>`;
+  if(!d.tips.length) return `<div class="pophead">Everyone's tips</div><div class="poprow muted">No tips for this match</div>`;
+  const rows = d.tips.map(t=>{
+    const pts = d.finished ? `<span class="poppts ${t.outcome}">${t.points}</span>` : "";
+    return `<div class="poprow ${t.is_self?'self':''}"><span class="popname">${fmtEl(t.username)}</span>
+      <span class="popscore">${t.home}–${t.away}</span>${pts}</div>`;
+  }).join("");
+  return `<div class="pophead">Everyone's tips${d.finished?' · points':''}</div>${rows}`;
+}
+function positionPop(e){
+  const p = popEl(); const pad = 14;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  const w = p.offsetWidth, h = p.offsetHeight;
+  if(x + w > innerWidth - 8) x = e.clientX - w - pad;
+  if(y + h > innerHeight - 8) y = innerHeight - h - 8;
+  if(y < 8) y = 8;
+  p.style.left = x + "px"; p.style.top = y + "px";
+}
+async function showPop(id, e){
+  POP_FOR = id;
+  const p = popEl();
+  p.innerHTML = `<div class="poprow muted">Loading…</div>`;
+  p.hidden = false; positionPop(e);
+  const d = await tipsFor(id);
+  if(POP_FOR !== id) return;            // moved away while loading
+  p.innerHTML = renderPop(d); positionPop(e);
+}
+function hidePop(){ POP_FOR = null; popEl().hidden = true; }
+const CARD_SEL = ".m[data-id],.mini[data-id],.tie[data-id]";
+let HOVER_BOUND = false;
+function ensureHoverDelegation(){
+  if(HOVER_BOUND) return; HOVER_BOUND = true;
+  document.body.addEventListener("mouseover", (e)=>{
+    const el = e.target.closest(CARD_SEL);
+    if(el && POP_FOR !== el.dataset.id) showPop(el.dataset.id, e);
+  });
+  document.body.addEventListener("mousemove", (e)=>{ if(POP_FOR) positionPop(e); });
+  document.body.addEventListener("mouseout", (e)=>{
+    const el = e.target.closest(CARD_SEL);
+    if(el && !(e.relatedTarget && el.contains(e.relatedTarget))) hidePop();
+  });
+}
+
 function toast(msg){
   const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show");
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),3200);
@@ -522,5 +606,6 @@ document.getElementById("provSel").onchange = (e)=>{
   localStorage.setItem("wc_provider", ACTIVE_PROVIDER);
   getState();
 };
+ensureHoverDelegation();
 setAuthMode("login");
 checkAuth();
