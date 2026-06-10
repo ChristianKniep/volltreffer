@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
+<link rel="stylesheet" href="/static/fonts/fonts.css">
+<link rel="stylesheet" href="/static/style.css?v=11">
+</head>
+<body>
+<header class="top">
+  <div class="hostbar"></div>
+  <div class="mast">
+    <div class="logo">
+      <span class="kick">23rd Edition · 48 Nations · USA · Canada · Mexico</span>
+      <h1>World Cup <em>2026</em></h1>
+    </div>
+    <span class="ver" id="appVer" title="Loaded app build"></span>
+    <div class="spacer"></div>
+    <label class="provsel" id="provSelWrap" hidden>Tips:
+      <select id="provSel" title="Which betting backend's tips to show"></select>
+    </label>
+    <div class="meta-mini" id="metaMini">Loading…</div>
+    <button class="btn" id="updateBtn" title="Fetch finished results and sync your tips">Update results</button>
+    <span class="userbox" id="userBox" hidden>
+      <span class="who" id="whoami"></span>
+      <button class="btn ghost" id="logoutBtn">Log out</button>
+    </span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-view="schedule">Schedule</button>
+    <button role="tab" aria-selected="false" data-view="groups">Groups</button>
+    <button role="tab" aria-selected="false" data-view="bracket">Bracket</button>
+    <button role="tab" aria-selected="false" data-view="settings">Settings</button>
+    <button role="tab" aria-selected="false" data-view="admin" id="adminTab" hidden>Admin</button>
+    <button role="tab" aria-selected="false" data-view="instructions">Instructions</button>
+  </nav>
+</header>
+
+<div id="authGate" class="authgate" hidden>
+  <form class="authcard" id="authForm">
+    <h2>World Cup <em>2026</em></h2>
+    <p class="authsub" id="authSub">Sign in to see your predictions and tips</p>
+    <label>Username<input id="authUser" autocomplete="username" required></label>
+    <label>Password<input id="authPass" type="password" autocomplete="current-password" required></label>
+    <p class="autherr" id="authErr"></p>
+    <button class="btn primary" id="authSubmit" type="submit">Log in</button>
+    <p class="authtoggle">
+      <span id="authSwitchText">No account yet?</span>
+      <a href="#" id="authSwitch">Create one</a>
+    </p>
+  </form>
+  <div class="authcard" id="pendingCard" hidden>
+    <h2>Almost there</h2>
+    <p class="authsub">Your account <b id="pendingName"></b> was created and is waiting for an admin to approve it. You'll get in as soon as it's acknowledged.</p>
+    <button class="btn ghost" id="pendingLogout" type="button">Log out</button>
+  </div>
+</div>
+
+<main class="wrap">
+  <section class="view active" id="schedule" role="tabpanel">
+    <div class="viewhead"><h2>Day by day</h2><p>Every match in date order · tap a match to enter a result</p></div>
+    <div class="legend">
+      <span class="lab">Kick-off (CEST)</span><span>prime</span><span class="tgrad"></span><span>overnight</span>
+      <span class="lab" style="margin-left:8px">Fun-factor</span><span class="fpips" id="fkey"></span>
+    </div>
+    <nav class="subtabs" id="schedSub" role="tablist">
+      <button role="tab" data-sub="upcoming" aria-selected="true">Upcoming<span class="cnt" id="cntUp">0</span></button>
+      <button role="tab" data-sub="past" aria-selected="false">Past<span class="cnt" id="cntPast">0</span></button>
+    </nav>
+    <div class="daygrid subpanel active" id="schedUpcoming"></div>
+    <div class="daygrid subpanel" id="schedPast"></div>
+    <p class="note">Predictions come from a Poisson model driven by research-calibrated power ratings (FIFA April-2026 points; host nations get a home-advantage bonus). Informed guidance, not certainty.</p>
+  </section>
+
+  <section class="view" id="groups" role="tabpanel">
+    <div class="viewhead"><h2>Group stage</h2><p>Live standings · top 2 and the 8 best third-placed teams reach the Round of 32</p></div>
+    <div class="groups" id="groupGrid"></div>
+  </section>
+
+  <section class="view" id="bracket" role="tabpanel">
+    <div class="viewhead"><h2>Knockout bracket</h2><p>Slots fill automatically as group standings settle and ties are decided</p></div>
+    <div class="bracket" id="bracketBox"></div>
+    <p class="note">Highlighted slot = model's predicted advancer (or the actual winner once played). Third-place teams are assigned to Round-of-32 slots by a backtracking match of FIFA's allowed-group lists.</p>
+  </section>
+
+  <section class="view" id="settings" role="tabpanel">
+    <div class="viewhead"><h2>Settings</h2><p>Connect your betting backends · credentials are encrypted and private to your account</p></div>
+    <div class="provcards" id="provCards"></div>
+    <p class="note">Each backend is a plugin. Your credentials are stored encrypted on the server and never shared with other users. To rotate a token, paste a fresh one and save — leave a secret field blank to keep the stored value.</p>
+  </section>
+
+  <section class="view" id="admin" role="tabpanel">
+    <div class="viewhead"><h2>User management</h2><p>Acknowledge new sign-ups and set each member's role · new accounts start as <b>user</b>, pending approval</p></div>
+    <div class="usertable" id="userTable"></div>
+  </section>
+
+  <section class="view" id="instructions" role="tabpanel">
+    <div class="viewhead"><h2>Setup &amp; usage</h2><p>Run the stack locally and connect it to your teamtip round</p></div>
+
+    <div class="guide">
+      <h3>1 · Run the docker-compose stack</h3>
+      <p>You need <a href="https://docs.docker.com/get-docker/">Docker</a> with the Compose plugin. From the <code>wc2026-app/</code> folder:</p>
+      <pre><code>cd wc2026-app
+docker compose up -d --build</code></pre>
+      <p>Then open <a href="http://localhost:8000">http://localhost:8000</a>. The app seeds the schedule, predictions and bracket automatically on first start.</p>
+      <ul>
+        <li>The SQLite database lives in the named volume <code>wc2026-data</code> (mounted at <code>/data</code>), so results and synced tips survive restarts and rebuilds.</li>
+        <li>The source folder is bind-mounted (<code>./app:/srv/app</code>), so edits to the static files show up on a browser reload; Python changes need <code>docker compose restart wc2026</code>.</li>
+        <li>Enter results by clicking any match and filling in the score, or wire up an automatic feed via <code>FIXTURES_URL</code> / <code>FOOTBALL_DATA_TOKEN</code> in <code>docker-compose.yml</code>.</li>
+      </ul>
+      <p>Useful commands:</p>
+      <pre><code>docker compose logs -f wc2026      # follow logs
+docker compose restart wc2026      # reload after a Python change
+docker compose down                # stop (keeps the data volume)
+curl -X POST localhost:8000/api/reset   # wipe & re-seed the DB</code></pre>
+
+      <h3>2 · Create your account</h3>
+      <p>The app is multi-user. On first start an admin account is created from <code>ADMIN_USER</code> / <code>ADMIN_PASSWORD</code> in <code>docker-compose.yml</code> (default <code>admin</code> / <code>admin</code> — change it). Everyone else can self-register from the login screen unless you set <code>ALLOW_REGISTRATION: "false"</code>. Each account has its own tips and its own betting-backend credentials.</p>
+      <p class="warn">Set a strong <code>APP_SECRET_KEY</code> in <code>docker-compose.yml</code> — it encrypts every stored credential. Changing it later makes already-saved credentials unreadable (users just re-enter them).</p>
+
+      <h3>3 · Connect a betting backend (Settings tab)</h3>
+      <p>Betting sites are plugins. Open the <b>Settings</b> tab, pick a backend, fill in its fields and <b>Save</b>. For <b>teamtip.net</b> you need a bearer token plus your user and betgame IDs:</p>
+      <ol>
+        <li>Log in at <a href="https://teamtip.net">teamtip.net</a> in your browser.</li>
+        <li>Open DevTools (<kbd>F12</kbd> / <kbd>Cmd</kbd>+<kbd>Opt</kbd>+<kbd>I</kbd>) → <b>Network</b> tab.</li>
+        <li>Trigger a request to <code>/bg_bet</code> — e.g. open or refresh your tips/round page.</li>
+        <li>Click that <code>bg_bet</code> request → <b>Headers</b> → <b>Request Headers</b>, and copy the full <code>authorization</code> value (<code>Bearer eyJ…</code>).</li>
+        <li>Paste it into the <b>Bearer token</b> field in Settings, add your user / betgame IDs, and <b>Save &amp; test</b>.</li>
+      </ol>
+      <p>The token expires periodically — when sync reports it was rejected, grab a fresh one and re-save (leave other fields as-is). Synced tips are stored in the database and stay visible in the Groups overview (<b>Tip</b> column) even after the token later expires.</p>
+      <p>Click <b>Update results</b> in the header to fetch finished games and sync every backend you've connected in one go. The <b>Tips</b> selector next to it chooses which backend's tips are shown when you have more than one.</p>
+      <p class="warn">Credentials live encrypted in the database, scoped to your account — not in <code>docker-compose.yml</code>. The legacy <code>TEAMTIP_TOKEN</code> env var is still read once on first start and imported onto the admin account, so you can delete it from compose afterwards.</p>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+<script src="/static/app.js?v=11"></script>
+</body>
+</html>

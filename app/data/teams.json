@@ -1,0 +1,338 @@
+[
+  {
+    "name": "Mexico",
+    "group": "A",
+    "iso": "mx",
+    "rating": 1681,
+    "host": true
+  },
+  {
+    "name": "South Africa",
+    "group": "A",
+    "iso": "za",
+    "rating": 1450,
+    "host": false
+  },
+  {
+    "name": "South Korea",
+    "group": "A",
+    "iso": "kr",
+    "rating": 1569,
+    "host": false
+  },
+  {
+    "name": "Czechia",
+    "group": "A",
+    "iso": "cz",
+    "rating": 1500,
+    "host": false
+  },
+  {
+    "name": "Canada",
+    "group": "B",
+    "iso": "ca",
+    "rating": 1531,
+    "host": true
+  },
+  {
+    "name": "Bosnia & Herzegovina",
+    "group": "B",
+    "iso": "ba",
+    "rating": 1483,
+    "host": false
+  },
+  {
+    "name": "Qatar",
+    "group": "B",
+    "iso": "qa",
+    "rating": 1438,
+    "host": false
+  },
+  {
+    "name": "Switzerland",
+    "group": "B",
+    "iso": "ch",
+    "rating": 1649,
+    "host": false
+  },
+  {
+    "name": "Brazil",
+    "group": "C",
+    "iso": "br",
+    "rating": 1761,
+    "host": false
+  },
+  {
+    "name": "Morocco",
+    "group": "C",
+    "iso": "ma",
+    "rating": 1756,
+    "host": false
+  },
+  {
+    "name": "Haiti",
+    "group": "C",
+    "iso": "ht",
+    "rating": 1330,
+    "host": false
+  },
+  {
+    "name": "Scotland",
+    "group": "C",
+    "iso": "gb-sct",
+    "rating": 1503,
+    "host": false
+  },
+  {
+    "name": "USA",
+    "group": "D",
+    "iso": "us",
+    "rating": 1673,
+    "host": true
+  },
+  {
+    "name": "Paraguay",
+    "group": "D",
+    "iso": "py",
+    "rating": 1481,
+    "host": false
+  },
+  {
+    "name": "Australia",
+    "group": "D",
+    "iso": "au",
+    "rating": 1500,
+    "host": false
+  },
+  {
+    "name": "Türkiye",
+    "group": "D",
+    "iso": "tr",
+    "rating": 1560,
+    "host": false
+  },
+  {
+    "name": "Germany",
+    "group": "E",
+    "iso": "de",
+    "rating": 1730,
+    "host": false
+  },
+  {
+    "name": "Curaçao",
+    "group": "E",
+    "iso": "cw",
+    "rating": 1350,
+    "host": false
+  },
+  {
+    "name": "Ivory Coast",
+    "group": "E",
+    "iso": "ci",
+    "rating": 1492,
+    "host": false
+  },
+  {
+    "name": "Ecuador",
+    "group": "E",
+    "iso": "ec",
+    "rating": 1567,
+    "host": false
+  },
+  {
+    "name": "Netherlands",
+    "group": "F",
+    "iso": "nl",
+    "rating": 1758,
+    "host": false
+  },
+  {
+    "name": "Japan",
+    "group": "F",
+    "iso": "jp",
+    "rating": 1660,
+    "host": false
+  },
+  {
+    "name": "Sweden",
+    "group": "F",
+    "iso": "se",
+    "rating": 1556,
+    "host": false
+  },
+  {
+    "name": "Tunisia",
+    "group": "F",
+    "iso": "tn",
+    "rating": 1499,
+    "host": false
+  },
+  {
+    "name": "Belgium",
+    "group": "G",
+    "iso": "be",
+    "rating": 1735,
+    "host": false
+  },
+  {
+    "name": "Egypt",
+    "group": "G",
+    "iso": "eg",
+    "rating": 1518,
+    "host": false
+  },
+  {
+    "name": "Iran",
+    "group": "G",
+    "iso": "ir",
+    "rating": 1630,
+    "host": false
+  },
+  {
+    "name": "New Zealand",
+    "group": "G",
+    "iso": "nz",
+    "rating": 1330,
+    "host": false
+  },
+  {
+    "name": "Spain",
+    "group": "H",
+    "iso": "es",
+    "rating": 1876,
+    "host": false
+  },
+  {
+    "name": "Cape Verde",
+    "group": "H",
+    "iso": "cv",
+    "rating": 1380,
+    "host": false
+  },
+  {
+    "name": "Saudi Arabia",
+    "group": "H",
+    "iso": "sa",
+    "rating": 1430,
+    "host": false
+  },
+  {
+    "name": "Uruguay",
+    "group": "H",
+    "iso": "uy",
+    "rating": 1673,
+    "host": false
+  },
+  {
+    "name": "France",
+    "group": "I",
+    "iso": "fr",
+    "rating": 1877,
+    "host": false
+  },
+  {
+    "name": "Senegal",
+    "group": "I",
+    "iso": "sn",
+    "rating": 1689,
+    "host": false
+  },
+  {
+    "name": "Iraq",
+    "group": "I",
+    "iso": "iq",
+    "rating": 1416,
+    "host": false
+  },
+  {
+    "name": "Norway",
+    "group": "I",
+    "iso": "no",
+    "rating": 1639,
+    "host": false
+  },
+  {
+    "name": "Argentina",
+    "group": "J",
+    "iso": "ar",
+    "rating": 1875,
+    "host": false
+  },
+  {
+    "name": "Algeria",
+    "group": "J",
+    "iso": "dz",
+    "rating": 1507,
+    "host": false
+  },
+  {
+    "name": "Austria",
+    "group": "J",
+    "iso": "at",
+    "rating": 1556,
+    "host": false
+  },
+  {
+    "name": "Jordan",
+    "group": "J",
+    "iso": "jo",
+    "rating": 1402,
+    "host": false
+  },
+  {
+    "name": "Portugal",
+    "group": "K",
+    "iso": "pt",
+    "rating": 1764,
+    "host": false
+  },
+  {
+    "name": "DR Congo",
+    "group": "K",
+    "iso": "cd",
+    "rating": 1462,
+    "host": false
+  },
+  {
+    "name": "Uzbekistan",
+    "group": "K",
+    "iso": "uz",
+    "rating": 1422,
+    "host": false
+  },
+  {
+    "name": "Colombia",
+    "group": "K",
+    "iso": "co",
+    "rating": 1693,
+    "host": false
+  },
+  {
+    "name": "England",
+    "group": "L",
+    "iso": "gb-eng",
+    "rating": 1826,
+    "host": false
+  },
+  {
+    "name": "Croatia",
+    "group": "L",
+    "iso": "hr",
+    "rating": 1717,
+    "host": false
+  },
+  {
+    "name": "Ghana",
+    "group": "L",
+    "iso": "gh",
+    "rating": 1483,
+    "host": false
+  },
+  {
+    "name": "Panama",
+    "group": "L",
+    "iso": "pa",
+    "rating": 1430,
+    "host": false
+  }
+]

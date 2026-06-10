@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+shot_*.png
+.venv/
+.git/
+.DS_Store
