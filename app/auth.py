@@ -12,7 +12,7 @@ import hmac
 import os
 import secrets
 
-from fastapi import Cookie, Depends, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 
 from . import db
 
@@ -89,6 +89,25 @@ def delete_user(conn, uid: int) -> None:
     conn.commit()
 
 
+# ---------- personal API tokens ----------
+def rotate_api_token(conn, user_id: int) -> str:
+    token = "vt_" + secrets.token_urlsafe(24)
+    conn.execute("UPDATE users SET api_token=? WHERE id=?", (token, user_id))
+    conn.commit()
+    return token
+
+
+def clear_api_token(conn, user_id: int) -> None:
+    conn.execute("UPDATE users SET api_token=NULL WHERE id=?", (user_id,))
+    conn.commit()
+
+
+def get_user_by_token(conn, token: str | None):
+    if not token:
+        return None
+    return conn.execute("SELECT * FROM users WHERE api_token=?", (token,)).fetchone()
+
+
 # ---------- sessions ----------
 def start_session(conn, user_id: int) -> str:
     token = secrets.token_urlsafe(32)
@@ -123,11 +142,20 @@ def _session_user(conn, token: str | None):
 
 
 # ---------- FastAPI dependencies ----------
-def current_account(wc_session: str | None = Cookie(default=None)):
-    """Require a logged-in account (may still be awaiting approval); 401 otherwise."""
+def current_account(authorization: str | None = Header(default=None),
+                    wc_session: str | None = Cookie(default=None)):
+    """Resolve the caller from a personal `Authorization: Bearer <api_token>`
+    (for agents/automation acting as that user) or the session cookie. 401 if
+    neither resolves. The account may still be awaiting approval."""
     conn = db.connect()
     try:
-        user = _session_user(conn, wc_session)
+        user = None
+        if authorization:
+            scheme, _, value = authorization.partition(" ")
+            if scheme.lower() == "bearer" and value.strip():
+                user = get_user_by_token(conn, value.strip())
+        if not user:
+            user = _session_user(conn, wc_session)
     finally:
         conn.close()
     if not user:
@@ -144,6 +172,31 @@ def current_user(user=Depends(current_account)):
 
 def require_admin(user=Depends(current_user)):
     """Require an approved admin; 403 otherwise."""
+    if user["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    return user
+
+
+def automation_or_admin(authorization: str | None = Header(default=None),
+                        wc_session: str | None = Cookie(default=None)):
+    """Allow machine clients (agents) via `Authorization: Bearer <AUTOMATION_TOKEN>`,
+    or a logged-in admin via the session cookie. Returns a principal dict."""
+    token = os.environ.get("AUTOMATION_TOKEN")
+    if token and authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and hmac.compare_digest(value.strip(), token):
+            return {"id": None, "username": "automation", "role": "admin",
+                    "approved": 1, "automation": True}
+    # fall back to an admin session
+    conn = db.connect()
+    try:
+        user = _session_user(conn, wc_session)
+    finally:
+        conn.close()
+    if not user:
+        raise HTTPException(401, "not authenticated")
+    if not user["approved"]:
+        raise HTTPException(403, "account pending admin approval")
     if user["role"] != "admin":
         raise HTTPException(403, "admin only")
     return user

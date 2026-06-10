@@ -133,7 +133,20 @@ section.view.active{display:block}
 .tipchip.ok{border-color:var(--good); background:rgba(26,138,74,.12); color:#15663a}
 .tipchip.ok i{color:#2e8b57}
 .tipchip.none{opacity:.6}
-.pred .rat{font-size:11.5px; color:var(--ink2); flex:1; min-width:120px}
+/* reasoning shown as a hover tooltip on the predicted score */
+.predwrap{position:relative; display:inline-flex; align-items:center; gap:6px}
+.predwrap[data-tip]{cursor:help}
+.rathint{font-family:'Saira Condensed',sans-serif; font-size:10px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--muted); border-bottom:1px dotted var(--muted)}
+.predwrap[data-tip]:hover .rathint{color:var(--ink2); border-bottom-color:var(--ink2)}
+.predwrap[data-tip]:hover::after{
+  content:attr(data-tip); position:absolute; left:0; bottom:calc(100% + 8px);
+  background:var(--ink); color:#F4EFE1; padding:8px 11px; border-radius:8px;
+  font-size:12px; line-height:1.45; width:max-content; max-width:280px; white-space:normal;
+  box-shadow:0 8px 24px rgba(20,15,8,.35); z-index:40; pointer-events:none}
+.predwrap[data-tip]:hover::before{
+  content:""; position:absolute; left:16px; bottom:calc(100% + 3px);
+  border:5px solid transparent; border-top-color:var(--ink); z-index:40; pointer-events:none}
 .bar{height:7px; border-radius:4px; overflow:hidden; display:flex; margin-top:5px; background:#e9dec6}
 .bar i{display:block; height:100%}
 .bar .h{background:#2e6db4} .bar .d{background:#cbb88a} .bar .a{background:#b8472a}
@@ -352,5 +365,33 @@ table.tbl td.pts{font-weight:700}
   text-align:center; border-radius:5px; padding:0 5px; color:#fff}
 .tippop .poppts.exact{background:var(--good)} .tippop .poppts.goaldiff{background:#e0561f}
 .tippop .poppts.tendency{background:#c7a63c} .tippop .poppts.miss{background:#6b6256}
+
+/* timezone + kick-off slot editor */
+.tzcard{margin-bottom:16px}
+.tzrow{display:flex; gap:8px; align-items:center}
+.tzrow select{flex:1; font-size:14px; padding:8px 10px; border:1px solid var(--line); border-radius:7px;
+  background:var(--paper); color:var(--ink); max-width:320px}
+.tzrow .btn{white-space:nowrap}
+.slotlab{font-family:'Saira Condensed',sans-serif; font-size:12px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--ink2); margin:14px 0 6px}
+.slotlab small{text-transform:none; letter-spacing:0; color:var(--muted)}
+.slotstrip{display:flex; flex-wrap:wrap; gap:3px}
+.slotcell{display:flex; flex-direction:column; align-items:center; gap:1px; width:34px; padding:4px 0;
+  border:1px solid rgba(0,0,0,.10); border-radius:5px; cursor:pointer; color:#222}
+.slotcell .sh{font-family:'Saira Condensed',sans-serif; font-size:11px; font-weight:700; opacity:.7}
+.slotcell .sr{font-family:'Saira Condensed',sans-serif; font-size:13px; font-weight:800}
+.slotcell:hover{outline:2px solid var(--ink); outline-offset:1px}
+
+/* personal API token card */
+.tokencard{margin-bottom:16px}
+.tokrow{display:flex; gap:8px; align-items:center; margin:4px 0 2px}
+.tokrow input{flex:1; font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace; font-size:13px;
+  padding:8px 10px; border:1px solid var(--line); border-radius:7px; background:var(--paper); color:var(--ink)}
+
+/* prediction override marker */
+.ovtag{font-family:'Saira Condensed',sans-serif; font-size:10px; text-transform:uppercase;
+  letter-spacing:.05em; color:#fff; background:#6a359c; border-radius:999px; padding:0 6px; margin-left:6px}
+.pred .ps.ov i{color:#6a359c}
+.pred .ps.ov{border-color:#6a359c}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 <body>
 <header class="top">
@@ -62,7 +62,7 @@
   <section class="view active" id="schedule" role="tabpanel">
     <div class="viewhead"><h2>Day by day</h2><p>Every match in date order · tap a match to enter a result</p></div>
     <div class="legend">
-      <span class="lab">Kick-off (CEST)</span><span>prime</span><span class="tgrad"></span><span>overnight</span>
+      <span class="lab" id="tzLab">Kick-off</span><span>good</span><span class="tgrad"></span><span>avoid</span>
       <span class="lab" style="margin-left:8px">Fun-factor</span><span class="fpips" id="fkey"></span>
     </div>
     <nav class="subtabs" id="schedSub" role="tablist">
@@ -94,6 +94,37 @@
 
   <section class="view" id="settings" role="tabpanel">
     <div class="viewhead"><h2>Settings</h2><p>Connect your betting backends · credentials are encrypted and private to your account</p></div>
+
+    <div class="provcard tokencard">
+      <div class="phead"><h3>Personal API token</h3><span class="pstat" id="tokStat">none</span></div>
+      <p class="pblurb">Use this with the <b>my-predictions</b> skill to update your own match predictions from an agent (see the Instructions tab). It acts as <em>you</em> — treat it like a password and revoke it if it leaks.</p>
+      <div class="tokrow">
+        <input id="tokInput" type="text" readonly placeholder="No token yet — generate one">
+        <button class="btn ghost" id="tokCopy" type="button">Copy</button>
+      </div>
+      <div class="pacts">
+        <button class="btn primary" id="tokGen" type="button">Generate</button>
+        <button class="btn ghost" id="tokRevoke" type="button">Revoke</button>
+      </div>
+    </div>
+
+    <div class="provcard tzcard">
+      <div class="phead"><h3>Time zone &amp; kick-off slots</h3></div>
+      <p class="pblurb">Kick-off times and the day-by-day grouping use <em>your</em> time zone. Rate each hour of your day 1 (avoid) – 5 (perfect) to colour the schedule's kick-off tint to your life — green for slots you like, red for ones you don't.</p>
+      <label class="pf"><span>Time zone</span>
+        <div class="tzrow">
+          <select id="tzSel"></select>
+          <button class="btn ghost" id="tzDetect" type="button" title="Detect from this device">Use my device</button>
+        </div>
+      </label>
+      <div class="slotlab">Hour ratings <small>(your local time · click an hour to cycle 1–5)</small></div>
+      <div class="slotstrip" id="slotStrip"></div>
+      <div class="pacts">
+        <button class="btn primary" id="prefSave" type="button">Save</button>
+        <button class="btn ghost" id="slotReset" type="button">Reset hours to default</button>
+      </div>
+    </div>
+
     <div class="provcards" id="provCards"></div>
     <p class="note">Each backend is a plugin. Your credentials are stored encrypted on the server and never shared with other users. To rotate a token, paste a fresh one and save — leave a secret field blank to keep the stored value.</p>
   </section>
@@ -139,12 +170,32 @@ curl -X POST localhost:8000/api/reset   # wipe & re-seed the DB</code></pre>
       <p>The token expires periodically — when sync reports it was rejected, grab a fresh one and re-save (leave other fields as-is). Synced tips are stored in the database and stay visible in the Groups overview (<b>Tip</b> column) even after the token later expires.</p>
       <p>Click <b>Update results</b> in the header to fetch finished games and sync every backend you've connected in one go. The <b>Tips</b> selector next to it chooses which backend's tips are shown when you have more than one.</p>
       <p class="warn">Credentials live encrypted in the database, scoped to your account — not in <code>docker-compose.yml</code>. The legacy <code>TEAMTIP_TOKEN</code> env var is still read once on first start and imported onto the admin account, so you can delete it from compose afterwards.</p>
+
+      <h3>4 · Update your predictions with an agent (skill)</h3>
+      <p>Each match shows a model prediction. You can revise the prediction <b>in your own view</b> — for example after a matchday, feeding in news and reasoning — using the <b>my-predictions</b> skill from any agent harness (Claude Code, the Claude Agent SDK, etc.). Your changes are private to your account and never touch the shared model or your betting tips.</p>
+      <ol>
+        <li><b>Get your token.</b> On the <b>Settings</b> tab, click <b>Generate</b> under <i>Personal API token</i> and copy it.</li>
+        <li><b>Install the skill.</b> It ships in the repo at <code>skills/my-predictions/</code> (a <code>SKILL.md</code> + a dependency-free <code>my_predictions.py</code> client). Point your agent at that folder — e.g. for Claude Code, copy it under <code>.claude/skills/</code> in your project, or pass the path to the Agent SDK.</li>
+        <li><b>Configure it</b> with two environment variables:</li>
+      </ol>
+      <pre><code>export VOLLTREFFER_URL="http://localhost:8000"
+export VOLLTREFFER_TOKEN="vt_…"      # the token from Settings</code></pre>
+      <p>Then talk to your agent about the matches and let it write your predictions back. Example prompt:</p>
+      <pre><code>Using the my-predictions skill, let's review Group C after matchday 2.
+Here's the coverage I gathered: &lt;paste articles / notes&gt;.
+
+Go match by match through my upcoming fixtures. For each, tell me the
+current prediction, weigh the news (injuries, form, must-win context),
+and propose a revised scoreline with a one-line rationale. When I agree,
+update my prediction for that match. Afterwards, show me the diff.</code></pre>
+      <p>The agent reads your view via <code>GET /api/state</code>, then calls <code>POST /api/match/&lt;id&gt;/my-prediction</code> with the new scoreline (and optional rationale) for each match you approve; <code>DELETE</code> on the same path reverts a match to the model. Match IDs are <code>G01</code>–<code>G72</code> (group) and <code>M73</code>–<code>M104</code> (knockout). Revised matches show a small <span class="ovtag">your view</span> marker.</p>
+      <p>Using <b>OpenCode</b>? <code>skills/OPENCODE.md</code> has a copy-paste setup to run the skill from an empty directory (drop it in <code>.opencode/skills/</code>, export <code>VOLLTREFFER_URL</code>/<code>VOLLTREFFER_TOKEN</code>, run <code>opencode</code>).</p>
     </div>
   </section>
 </main>
 
 <div id="toast"></div>
 <div id="tipPop" class="tippop" hidden></div>
-<script src="/static/app.js?v=12"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>

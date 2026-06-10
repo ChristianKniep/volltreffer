@@ -16,6 +16,10 @@ services:
       ADMIN_PASSWORD: "change-me"
       # ALLOW_REGISTRATION: "true"   # set "false" to make it invite-only (admin creates users)
       # COOKIE_SECURE: "true"        # set when serving over HTTPS
+      # DEFAULT_TZ: "Europe/Berlin"  # fallback tz before a user picks their own (auto-detected from their browser)
+      # --- let an agent/automation update the prediction model via the API ---
+      # AUTOMATION_TOKEN: "<long random string>"   # Bearer token for /api/ratings + overrides
+      # SCORE_EXACT: "4"   SCORE_GOALDIFF: "3"   SCORE_TENDENCY: "2"   # leaderboard points
       # --- optional: let "Update results" pull finished games automatically ---
       # A) simple JSON feed you control (list of {id, home_score, away_score, home_pens?, away_pens?})
       # FIXTURES_URL: "https://example.com/wc2026-results.json"
@@ -27,6 +31,7 @@ services:
       # TEAMTIP_TOKEN: "Bearer eyJ..."
       # TEAMTIP_USER: "454596"
       # TEAMTIP_BETGAME: "150936"
+      AUTOMATION_TOKEN: "If0mVrn9dkc_GwSdpcfgliLj4MML68WLsq_3WM7qjIb-tMpY2Qafs-7Ebh2NvqRM"
     volumes:
       - wc2026-data:/data          # SQLite database persists here
       - ./app:/srv/app             # live-mount source for dev (edit + reload, no rebuild)
