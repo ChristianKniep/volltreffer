@@ -7,6 +7,7 @@ encrypted, and tips are kept per user + provider.
 import datetime
 import os
 import pathlib
+from zoneinfo import ZoneInfo
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -14,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import auth, db, providers, resolve as R, score as SC, updater as U
-from .predict import predict, rationale
+from .predict import predict, rationale, HOST_BONUS, BASE_XG, ELO_DIV
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 
@@ -31,6 +32,10 @@ RIVALRY = {
 }
 RMIN, RMAX = 1330, 1877
 ALLOW_REG = os.environ.get("ALLOW_REGISTRATION", "true").lower() in ("1", "true", "yes")
+DEFAULT_TZ = os.environ.get("DEFAULT_TZ", "Europe/Berlin")
+# how good each local hour (0–23) is by default, 1 (avoid) … 5 (perfect); users customise this.
+DEFAULT_SLOTS = [3, 2, 2, 1, 1, 1, 2, 2, 3, 3, 3, 3,
+                 3, 3, 3, 3, 4, 4, 5, 5, 5, 5, 5, 4]
 
 app = FastAPI(title="World Cup 2026")
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
@@ -80,23 +85,17 @@ def _excitement(m, ratings):
     return {"tier": t, "color": HEAT[t]}
 
 
-def _time_friendliness(cest):
-    hh = cest.hour + cest.minute / 60.0
-    if hh < 12: hh += 24
-    pts = [(18,0.85),(19,1.0),(21,1.0),(22,0.80),(23,0.58),
-           (24,0.45),(26,0.22),(27.5,0.10),(29,0.0)]
-    if hh <= pts[0][0]: return pts[0][1]
-    if hh >= pts[-1][0]: return pts[-1][1]
-    for i in range(len(pts) - 1):
-        x0, y0 = pts[i]; x1, y1 = pts[i + 1]
-        if x0 <= hh <= x1:
-            return y0 + (y1 - y0) * (hh - x0) / (x1 - x0)
-    return 0.5
-
-
-def _time_color(cest):
-    s = _time_friendliness(cest)
+def _slot_color(rating):
+    """Map a 1–5 slot rating to the green(good)→red(bad) kick-off tint."""
+    s = (max(1, min(5, int(rating))) - 1) / 4.0
     return f"hsl({int(round(s*125))},72%,{int(round(81-(1-s)*5))}%)"
+
+
+def _user_tz(tz_name):
+    try:
+        return ZoneInfo(tz_name or DEFAULT_TZ), (tz_name or DEFAULT_TZ)
+    except Exception:  # noqa: BLE001 - unknown/missing zone falls back
+        return ZoneInfo(DEFAULT_TZ), DEFAULT_TZ
 
 
 # ---------- providers ----------
@@ -195,6 +194,12 @@ def _state(user_id, provider_id):
                 (user_id, provider_id)):
             tips[r["match_id"]] = {"home": r["home"], "away": r["away"],
                                    "updated_at": r["updated_at"]}
+    overrides = db.get_overrides(conn)
+    user_overrides = db.get_user_overrides(conn, user_id)
+
+    tz_pref, slots_pref = db.get_prefs(conn, user_id)
+    tz, tz_name = _user_tz(tz_pref)
+    slots = slots_pref if (isinstance(slots_pref, list) and len(slots_pref) == 24) else DEFAULT_SLOTS
 
     groups = {}
     for g in R.GROUPS:
@@ -211,13 +216,25 @@ def _state(user_id, provider_id):
     matches = []
     for m in conn.execute("SELECT * FROM matches ORDER BY kickoff_et, match_no"):
         et = datetime.datetime.strptime(m["kickoff_et"], "%Y-%m-%d %H:%M")
-        cest = et + datetime.timedelta(hours=6)
+        # kickoff_et is US-Eastern wall-clock (EDT, UTC-4) → UTC instant → user's tz
+        local = (et.replace(tzinfo=datetime.timezone.utc) + datetime.timedelta(hours=4)).astimezone(tz)
+        rating = slots[local.hour]
         h, a = m["home_team"], m["away_team"]
         pred = None
         if h and a:
             p = predict(ratings[h], ratings[a], hosts.get(h, False), hosts.get(a, False),
                         knockout=(m["stage"] == "ko"))
             p["rationale"] = rationale(h, a, p, knockout=(m["stage"] == "ko"))
+            ov = overrides.get(m["id"])
+            if ov:
+                p.update(ov)            # global (admin/automation) override
+                p["overridden"] = True
+                p["override_source"] = "shared"
+            uov = user_overrides.get(m["id"])
+            if uov:
+                p.update(uov)           # this user's own view wins last
+                p["overridden"] = True
+                p["override_source"] = "you"
             pred = p
         tip = tips.get(m["id"])
         if tip and pred:
@@ -226,8 +243,9 @@ def _state(user_id, provider_id):
             "id": m["id"], "stage": m["stage"], "round": m["round"], "group": m["grp"],
             "match_no": m["match_no"], "venue": m["venue"], "city": m["city"],
             "kickoff_et": m["kickoff_et"],
-            "cest_date": cest.strftime("%a %d %b").upper(),
-            "cest_time": cest.strftime("%H:%M"), "et_time": et.strftime("%H:%M"),
+            "local_date": local.strftime("%a %d %b").upper(),
+            "local_time": local.strftime("%H:%M"), "et_time": et.strftime("%H:%M"),
+            "tz_abbr": local.strftime("%Z"),
             "home_ref": m["home_ref"], "away_ref": m["away_ref"],
             "home": h, "away": a,
             "home_iso": teams[h]["iso"] if h else None,
@@ -237,7 +255,8 @@ def _state(user_id, provider_id):
             "winner": R.ko_winner(conn, m["id"]) if m["stage"] == "ko" else None,
             "status": m["status"],
             "excitement": _excitement(m, ratings),
-            "time_color": _time_color(cest),
+            "time_color": _slot_color(rating),
+            "time_rating": rating,
             "prediction": pred,
             "tip": tip,
         })
@@ -249,7 +268,8 @@ def _state(user_id, provider_id):
                   for pid in db.configured_provider_ids(conn, user_id)]
     conn.close()
     return {"meta": {**meta, "total": len(matches), "finished": finished,
-                     "active_provider": provider_id, "providers": configured},
+                     "active_provider": provider_id, "providers": configured,
+                     "timezone": tz_name},
             "groups": groups, "matches": matches}
 
 
@@ -324,6 +344,69 @@ def auth_logout(response: Response, wc_session: str | None = Cookie(default=None
     return {"ok": True}
 
 
+# ---- personal API token (for the prediction skill) ----
+@app.get("/api/auth/token")
+def auth_token_get(user=Depends(auth.current_user)):
+    return {"token": user["api_token"]}
+
+
+@app.post("/api/auth/token")
+def auth_token_rotate(user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        token = auth.rotate_api_token(conn, user["id"])
+    finally:
+        conn.close()
+    return {"token": token}
+
+
+@app.delete("/api/auth/token")
+def auth_token_revoke(user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        auth.clear_api_token(conn, user["id"])
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+# ---- display prefs: timezone + kick-off slot ratings ----
+@app.get("/api/me/prefs")
+def me_prefs_get(user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        tz, slots = db.get_prefs(conn, user["id"])
+    finally:
+        conn.close()
+    return {"timezone": tz or DEFAULT_TZ, "tz_explicit": tz is not None,
+            "slots": slots if (isinstance(slots, list) and len(slots) == 24) else DEFAULT_SLOTS,
+            "default_slots": DEFAULT_SLOTS}
+
+
+class PrefsBody(BaseModel):
+    timezone: str | None = None
+    slots: list[int] | None = None
+
+
+@app.put("/api/me/prefs")
+def me_prefs_put(body: PrefsBody, user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        if body.timezone is not None:
+            try:
+                ZoneInfo(body.timezone)
+            except Exception:  # noqa: BLE001
+                raise HTTPException(400, f"unknown timezone: {body.timezone}")
+            db.set_timezone(conn, user["id"], body.timezone)
+        if body.slots is not None:
+            if len(body.slots) != 24 or any(x < 1 or x > 5 for x in body.slots):
+                raise HTTPException(400, "slots must be 24 integers in 1..5")
+            db.set_slot_ratings(conn, user["id"], [int(x) for x in body.slots])
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 # ---------- routes: admin (user management) ----------
 @app.get("/api/admin/users")
 def admin_users(admin=Depends(auth.require_admin)):
@@ -383,6 +466,99 @@ def admin_delete(uid: int, admin=Depends(auth.require_admin)):
     finally:
         conn.close()
     return {"ok": True}
+
+
+# ---------- routes: prediction model (agent-writable) ----------
+@app.get("/api/ratings")
+def api_ratings_get(principal=Depends(auth.automation_or_admin)):
+    conn = db.connect()
+    try:
+        return {"ratings": db.get_ratings(conn),
+                "model": {"host_bonus": HOST_BONUS, "base_xg": BASE_XG, "elo_div": ELO_DIV},
+                "overrides": db.get_overrides(conn)}
+    finally:
+        conn.close()
+
+
+class RatingsBody(BaseModel):
+    ratings: dict[str, int]
+
+
+@app.put("/api/ratings")
+def api_ratings_put(body: RatingsBody, principal=Depends(auth.automation_or_admin)):
+    if not body.ratings:
+        raise HTTPException(400, "no ratings supplied")
+    conn = db.connect()
+    try:
+        updated, unknown = db.update_ratings(conn, body.ratings)
+    finally:
+        conn.close()
+    return {"ok": True, "updated": updated, "unknown": unknown}
+
+
+# accepted override fields (subset of a prediction); everything else is ignored
+_OVERRIDE_FIELDS = {"score_home", "score_away", "p_home", "p_draw", "p_away",
+                    "adv_home", "adv_away", "favored", "confidence", "rationale"}
+
+
+@app.post("/api/match/{mid}/prediction")
+def api_prediction_set(mid: str, body: dict, principal=Depends(auth.automation_or_admin)):
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM matches WHERE id=?", (mid,)).fetchone():
+            raise HTTPException(404, f"match {mid} not found")
+        data = {k: body[k] for k in _OVERRIDE_FIELDS if k in body}
+        if not data:
+            raise HTTPException(400, f"supply at least one of: {sorted(_OVERRIDE_FIELDS)}")
+        db.set_override(conn, mid, data)
+    finally:
+        conn.close()
+    return {"ok": True, "match_id": mid, "override": data}
+
+
+@app.delete("/api/match/{mid}/prediction")
+def api_prediction_clear(mid: str, principal=Depends(auth.automation_or_admin)):
+    conn = db.connect()
+    try:
+        db.delete_override(conn, mid)
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+# ---- per-user prediction overrides (the caller's own view) ----
+@app.post("/api/match/{mid}/my-prediction")
+def api_my_prediction_set(mid: str, body: dict, user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM matches WHERE id=?", (mid,)).fetchone():
+            raise HTTPException(404, f"match {mid} not found")
+        data = {k: body[k] for k in _OVERRIDE_FIELDS if k in body}
+        if not data:
+            raise HTTPException(400, f"supply at least one of: {sorted(_OVERRIDE_FIELDS)}")
+        db.set_user_override(conn, user["id"], mid, data)
+    finally:
+        conn.close()
+    return {"ok": True, "match_id": mid, "prediction": data}
+
+
+@app.delete("/api/match/{mid}/my-prediction")
+def api_my_prediction_clear(mid: str, user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        db.delete_user_override(conn, user["id"], mid)
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/my-predictions")
+def api_my_predictions(user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        return {"overrides": db.get_user_overrides(conn, user["id"])}
+    finally:
+        conn.close()
 
 
 # ---------- routes: providers ----------

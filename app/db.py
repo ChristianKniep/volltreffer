@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS users (
   is_admin   INTEGER NOT NULL DEFAULT 0,
   role       TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user'
   approved   INTEGER NOT NULL DEFAULT 0,      -- admin must acknowledge new signups
+  api_token  TEXT,                            -- personal token for the prediction API
+  timezone   TEXT,                            -- IANA tz for displaying kick-off times
+  slot_ratings TEXT,                          -- JSON [24] ints 1-5: how good each local hour is
   created_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -64,6 +67,18 @@ CREATE TABLE IF NOT EXISTS tips (
   away        INTEGER NOT NULL,
   updated_at  TEXT,
   PRIMARY KEY (user_id, provider_id, match_id)
+);
+CREATE TABLE IF NOT EXISTS prediction_overrides (
+  match_id   TEXT PRIMARY KEY,
+  data       TEXT NOT NULL,        -- JSON: subset of prediction fields to override (global/admin)
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS user_pred_overrides (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  match_id   TEXT NOT NULL,
+  data       TEXT NOT NULL,        -- JSON: this user's own prediction for the match
+  updated_at TEXT,
+  PRIMARY KEY (user_id, match_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
@@ -111,6 +126,12 @@ def _migrate_users(conn):
     if "approved" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN approved INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE users SET approved=1")  # existing users predate approval
+    if "api_token" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN api_token TEXT")
+    if "timezone" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN timezone TEXT")
+    if "slot_ratings" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN slot_ratings TEXT")
     conn.commit()
 
 
@@ -231,3 +252,87 @@ def configured_provider_ids(conn, user_id) -> list[str]:
     return [r["provider_id"] for r in conn.execute(
         "SELECT provider_id FROM provider_creds WHERE user_id=? ORDER BY provider_id",
         (user_id,))]
+
+
+# ---------- ratings (prediction lever) ----------
+def get_ratings(conn):
+    return [dict(r) for r in conn.execute(
+        "SELECT name,grp,iso,rating,host FROM teams ORDER BY grp,name")]
+
+
+def update_ratings(conn, ratings: dict) -> tuple[list, list]:
+    """ratings = {team_name: new_rating}. Updates existing teams only.
+    Returns (updated_names, unknown_names)."""
+    known = {r["name"] for r in conn.execute("SELECT name FROM teams")}
+    updated, unknown = [], []
+    for name, val in ratings.items():
+        if name in known:
+            conn.execute("UPDATE teams SET rating=? WHERE name=?", (int(val), name))
+            updated.append(name)
+        else:
+            unknown.append(name)
+    conn.commit()
+    return updated, unknown
+
+
+# ---------- per-match prediction overrides ----------
+def get_overrides(conn) -> dict:
+    return {r["match_id"]: json.loads(r["data"])
+            for r in conn.execute("SELECT match_id,data FROM prediction_overrides")}
+
+
+def set_override(conn, match_id, data: dict):
+    conn.execute(
+        """INSERT INTO prediction_overrides(match_id,data,updated_at) VALUES(?,?,?)
+           ON CONFLICT(match_id) DO UPDATE SET data=excluded.data,
+             updated_at=excluded.updated_at""",
+        (match_id, json.dumps(data), _now()))
+    conn.commit()
+
+
+def delete_override(conn, match_id):
+    conn.execute("DELETE FROM prediction_overrides WHERE match_id=?", (match_id,))
+    conn.commit()
+
+
+# ---------- per-user prediction overrides (each user's own view) ----------
+def get_user_overrides(conn, user_id) -> dict:
+    return {r["match_id"]: json.loads(r["data"])
+            for r in conn.execute(
+                "SELECT match_id,data FROM user_pred_overrides WHERE user_id=?", (user_id,))}
+
+
+def set_user_override(conn, user_id, match_id, data: dict):
+    conn.execute(
+        """INSERT INTO user_pred_overrides(user_id,match_id,data,updated_at) VALUES(?,?,?,?)
+           ON CONFLICT(user_id,match_id) DO UPDATE SET data=excluded.data,
+             updated_at=excluded.updated_at""",
+        (user_id, match_id, json.dumps(data), _now()))
+    conn.commit()
+
+
+def delete_user_override(conn, user_id, match_id):
+    conn.execute("DELETE FROM user_pred_overrides WHERE user_id=? AND match_id=?",
+                 (user_id, match_id))
+    conn.commit()
+
+
+# ---------- per-user display prefs (timezone + kick-off slot ratings) ----------
+def get_prefs(conn, user_id) -> tuple:
+    r = conn.execute("SELECT timezone,slot_ratings FROM users WHERE id=?",
+                     (user_id,)).fetchone()
+    if not r:
+        return None, None
+    slots = json.loads(r["slot_ratings"]) if r["slot_ratings"] else None
+    return r["timezone"], slots
+
+
+def set_timezone(conn, user_id, tz: str):
+    conn.execute("UPDATE users SET timezone=? WHERE id=?", (tz, user_id))
+    conn.commit()
+
+
+def set_slot_ratings(conn, user_id, slots):
+    conn.execute("UPDATE users SET slot_ratings=? WHERE id=?",
+                 (json.dumps(slots), user_id))
+    conn.commit()

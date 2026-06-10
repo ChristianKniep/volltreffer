@@ -9,7 +9,7 @@ scoring. Ships as a single `docker compose up`.
 
 ## Features
 
-- **Schedule** — all 104 matches in date order, with a kick-off-time tint (green = CEST prime-time → red = overnight) and a 🔥 fun-factor badge.
+- **Schedule** — all 104 matches in date order, with a kick-off-time tint and a 🔥 fun-factor badge. Times, the day-by-day grouping and the tint are **per-user**: each account picks its time zone (auto-detected from the browser) and rates every hour of its day 1–5 to colour the tint to their own life.
 - **Groups & Bracket** — live standings that recompute from results; the knockout tree fills automatically as groups settle and ties are decided.
 - **Predictions** — a transparent Poisson expected-goals model gives a scoreline and win/advance probabilities for every match.
 - **Multi-user** — real accounts with login. New sign-ups are held pending until an admin approves them and assigns a role (`admin` / `user`).
@@ -82,6 +82,42 @@ Defined in `app/score.py`, the standard German-pool scheme (overridable via env)
 
 A correct non-exact draw (you tipped 1–1, it ended 2–2) counts as goal difference.
 
+## Predictions, and updating them via API
+
+Every match prediction comes from a transparent **Poisson expected-goals model**
+(`app/predict.py`) driven by one number per team — a **power rating** on the FIFA
+points scale. The rating gap (plus a +70 host bonus) sets each side's expected
+goals; a Poisson grid yields win/draw/loss probabilities and the most-likely
+scoreline (knockouts reallocate the draw into advance %). It's deterministic and
+doesn't learn from results — ratings are the lever.
+
+The model is **agent-writable**. With `AUTOMATION_TOKEN` set, any agent harness can
+read the inputs and write them back — adjust ratings (the model recomputes every
+prediction, excitement tier and bracket cue coherently) or pin a per-match override:
+
+```bash
+export VOLLTREFFER_URL=http://localhost:8000 AUTOMATION_TOKEN=…
+python skills/update-predictions/volltreffer_client.py get-ratings
+python skills/update-predictions/volltreffer_client.py put-ratings '{"Spain": 1885, "Norway": 1705}'
+python skills/update-predictions/volltreffer_client.py set-override G01 --home 2 --away 1 --rationale "Hosts roll."
+```
+
+`skills/update-predictions/SKILL.md` is a drop-in skill (with the dependency-free
+client) describing the workflow for any agent. Writes use `Authorization: Bearer
+<AUTOMATION_TOKEN>`; an admin session cookie also works.
+
+### Per-user predictions (everyone)
+
+Beyond the shared model, **each user can revise the prediction in their own view**
+— e.g. after a matchday, feeding in news. Every user generates a **personal API
+token** on the Settings tab; the `skills/my-predictions/` skill uses it to read
+their view and write per-match overrides (`POST /api/match/{id}/my-prediction`),
+private to that account and layered on top of the model (and any shared override).
+The Instructions tab walks through installing/configuring the skill with an example
+prompt. Personal tokens authenticate as the user via `Authorization: Bearer vt_…`.
+For an OpenCode-specific, empty-directory walkthrough see
+[`skills/OPENCODE.md`](skills/OPENCODE.md).
+
 ## API
 
 | Method | Path | Purpose |
@@ -89,6 +125,12 @@ A correct non-exact draw (you tipped 1–1, it ended 2–2) counts as goal diffe
 | `GET` | `/api/state?provider=` | teams, standings, matches (prediction, your tip for the active backend) |
 | `GET` | `/api/leaderboard` | pool standings across played matches |
 | `GET` | `/api/match/{id}/tips` | every player's tip for a game (revealed after kickoff) |
+| `GET/PUT` | `/api/ratings` | read / update team power ratings (automation token or admin) |
+| `POST/DELETE` | `/api/match/{id}/prediction` | set / clear a shared per-match prediction override |
+| `GET/POST/DELETE` | `/api/auth/token` | the caller's personal API token (read / regenerate / revoke) |
+| `POST/DELETE` | `/api/match/{id}/my-prediction` | set / clear the caller's own prediction for a match |
+| `GET` | `/api/my-predictions` | the caller's per-match overrides |
+| `GET/PUT` | `/api/me/prefs` | the caller's time zone + 24-hour 1–5 kick-off slot ratings |
 | `POST` | `/api/auth/{register,login,logout}` · `GET /api/auth/me` | accounts |
 | `GET` | `/api/admin/users` · `POST …/{id}/approve` · `…/{id}/role` · `DELETE …/{id}` | user management (admin) |
 | `GET/PUT/DELETE` | `/api/providers[/{id}/credentials]` · `POST /api/providers/{id}/{test,sync}` | betting backends |

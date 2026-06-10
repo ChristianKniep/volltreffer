@@ -1,9 +1,10 @@
 "use strict";
-const APP_VERSION = "v12";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v16";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
 const fmtEl = (s)=>{const d=document.createElement("div");d.textContent=s;return d.innerHTML;};
+const attrEsc = (s)=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const flag = (iso)=>iso?`<img class="fl" src="/static/flags/${iso}.svg" alt="">`:"";
 let STATE = null;
 let ME = null;
@@ -61,11 +62,19 @@ function predBar(p, ko, tip){
   const tipChip = tip
     ? `<span class="tipchip ${tip.differs?'diff':'ok'}" title="Your teamtip tip"><i>teamtip</i>${tip.home}–${tip.away}</span>`
     : `<span class="tipchip none" title="No teamtip tip synced"><i>teamtip</i>–</span>`;
-  return `<div class="pred"><div class="ttl">Prediction</div>
+  const ov = p.overridden, you = p.override_source==='you';
+  const ovLabel = you ? 'your view' : 'set';
+  const psLabel = you ? 'you' : (ov ? 'set' : 'model');
+  const psTitle = you ? 'Your own prediction' : (ov ? 'Shared override' : 'Model prediction');
+  const rat = p.rationale || "";
+  const wrap = `<span class="predwrap"${rat?` data-tip="${attrEsc(rat)}"`:''}>
+      <span class="ps ${ov?'ov':''}" title="${psTitle}"><i>${psLabel}</i>${p.score_home}–${p.score_away}</span>
+      ${rat?'<span class="rathint">why?</span>':''}
+    </span>`;
+  return `<div class="pred"><div class="ttl">Prediction${ov?` <span class="ovtag" title="${psTitle}">${ovLabel}</span>`:''}</div>
     <div class="line">
-      <span class="ps" title="Model prediction"><i>model</i>${p.score_home}–${p.score_away}</span>
+      ${wrap}
       ${tipChip}
-      <span class="rat">${fmtEl(p.rationale)}</span>
     </div>
     ${bar}${key}</div>`;
 }
@@ -118,12 +127,13 @@ function dayGridHTML(entries){
 }
 function byDateEntries(list){
   const o = {};
-  for(const m of list){ (o[m.cest_date] ||= []).push(m); }
+  for(const m of list){ (o[m.local_date] ||= []).push(m); }
   return Object.entries(o);
 }
 function renderSchedule(){
   document.getElementById("fkey").innerHTML =
     [1,2,3,4,5].map(i=>`<span class="fpip" style="background:${HEAT[i]}">🔥${i}</span>`).join("");
+  document.getElementById("tzLab").textContent = "Kick-off (" + (STATE.meta.timezone || "local") + ")";
   const now = Date.now();
   const isPast = (m)=> m.status==='finished' || kickoffMs(m) <= now;
   const upcoming = STATE.matches.filter(m=>!isPast(m));
@@ -152,7 +162,7 @@ function matchCard(m){
   const chipText = ko ? m.round : m.group;
   return `<div class="m ${m.status==='finished'?'played':''}" style="--heat:${m.excitement.color}" tabindex="0" data-id="${m.id}">
     <div class="row1">
-      <div class="time" style="background:${m.time_color}"><div class="c">${m.cest_time}</div><div class="e">${m.et_time} ET</div></div>
+      <div class="time" style="background:${m.time_color}" title="Slot rating ${m.time_rating}/5 (${m.tz_abbr})"><div class="c">${m.local_time}</div><div class="e">${m.et_time} ET</div></div>
       <div class="fix">
         ${teamSlot(m.home,m.home_ref,m.home_iso,m.home_score,m.home_pens,winH)}
         ${teamSlot(m.away,m.away_ref,m.away_iso,m.away_score,m.away_pens,winA)}
@@ -210,7 +220,7 @@ function miniMatch(m){
       || (m.tip.home<m.tip.away && m.home_score<m.away_score);
     tipCls = exact ? "hit" : (sameTend ? "tend" : "miss");
   }
-  const date = `${m.cest_date.split(" ").slice(1).join(" ")} ${m.cest_time}`;
+  const date = `${m.local_date.split(" ").slice(1).join(" ")} ${m.local_time}`;
   return `<div class="mini" data-id="${m.id}" title="${fmtEl(m.home)} v ${fmtEl(m.away)}">
     <span class="mt-date">${date}</span>
     <span class="mt-teams">${fmtEl(m.home)} v ${fmtEl(m.away)}</span>
@@ -371,6 +381,8 @@ function afterLogin(){
   document.getElementById("adminTab").hidden = !ME.is_admin;
   getState();
   loadSettings();
+  loadToken();
+  loadPrefs();
   if(ME.is_admin) loadAdmin();
 }
 async function logout(){
@@ -434,6 +446,85 @@ function bindProvCards(){
     };
   });
 }
+
+/* ---------- personal API token ---------- */
+function showToken(tok){
+  const input = document.getElementById("tokInput");
+  input.value = tok || "";
+  document.getElementById("tokStat").textContent = tok ? "active" : "none";
+  document.getElementById("tokStat").className = "pstat" + (tok ? " ok" : "");
+  document.getElementById("tokGen").textContent = tok ? "Regenerate" : "Generate";
+  document.getElementById("tokRevoke").style.display = tok ? "" : "none";
+}
+async function loadToken(){
+  const r = await fetch("/api/auth/token");
+  if(!r.ok) return;
+  showToken((await r.json()).token);
+}
+async function genToken(){
+  const r = await fetch("/api/auth/token",{method:"POST"});
+  if(!r.ok){ toast("Couldn't generate a token."); return; }
+  showToken((await r.json()).token); toast("Token generated — copy it now.");
+}
+async function revokeToken(){
+  if(!confirm("Revoke your token? Any agent using it will stop working.")) return;
+  await fetch("/api/auth/token",{method:"DELETE"});
+  showToken(null); toast("Token revoked.");
+}
+function copyToken(){
+  const v = document.getElementById("tokInput").value;
+  if(!v){ toast("Generate a token first."); return; }
+  navigator.clipboard?.writeText(v).then(()=>toast("Token copied."),()=>toast("Copy failed — select and copy manually."));
+}
+
+/* ---------- timezone + kick-off slot ratings ---------- */
+const DEFAULT_SLOTS = [3,2,2,1,1,1,2,2,3,3,3,3,3,3,3,3,4,4,5,5,5,5,5,4];
+let SLOTS = DEFAULT_SLOTS.slice();
+function slotColor(r){ const s=(Math.max(1,Math.min(5,r))-1)/4; return `hsl(${Math.round(s*125)},72%,${Math.round(81-(1-s)*5)}%)`; }
+function browserTz(){ try{ return Intl.DateTimeFormat().resolvedOptions().timeZone||""; }catch(e){ return ""; } }
+function tzOptions(){
+  try{ return Intl.supportedValuesOf("timeZone"); }
+  catch(e){ return [browserTz(),"UTC","Europe/Berlin","Europe/London","America/New_York","America/Los_Angeles","America/Sao_Paulo","Asia/Tokyo","Australia/Sydney"].filter(Boolean); }
+}
+function fillTzSelect(current){
+  const sel=document.getElementById("tzSel");
+  const zones=tzOptions().slice();
+  if(current && !zones.includes(current)) zones.unshift(current);
+  sel.innerHTML=zones.map(z=>`<option value="${z}" ${z===current?"selected":""}>${z}</option>`).join("");
+}
+function renderSlots(){
+  const strip=document.getElementById("slotStrip");
+  strip.innerHTML=SLOTS.map((r,h)=>`<button type="button" class="slotcell" data-h="${h}"
+    style="background:${slotColor(r)}" title="${String(h).padStart(2,"0")}:00 — ${r}/5">
+    <span class="sh">${String(h).padStart(2,"0")}</span><span class="sr">${r}</span></button>`).join("");
+  strip.querySelectorAll(".slotcell").forEach(b=>{
+    b.onclick=()=>{ const h=+b.dataset.h; SLOTS[h]=SLOTS[h]%5+1; renderSlots(); };
+  });
+}
+async function loadPrefs(){
+  const r=await fetch("/api/me/prefs"); if(!r.ok) return;
+  const d=await r.json();
+  SLOTS=(Array.isArray(d.slots)&&d.slots.length===24)?d.slots.slice():DEFAULT_SLOTS.slice();
+  let tz=d.timezone;
+  if(!d.tz_explicit){ const bt=browserTz(); if(bt) tz=bt; }
+  fillTzSelect(tz); renderSlots();
+  // first run: adopt the device's time zone so the schedule matches immediately
+  if(!d.tz_explicit){ const bt=browserTz(); if(bt && bt!==d.timezone){
+    await fetch("/api/me/prefs",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({timezone:bt})});
+    getState();
+  }}
+}
+async function savePrefs(){
+  const tz=document.getElementById("tzSel").value;
+  const r=await fetch("/api/me/prefs",{method:"PUT",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({timezone:tz,slots:SLOTS})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){ toast(d.detail||"Couldn't save."); return; }
+  toast("Time settings saved."); getState();
+}
+function detectTz(){ const bt=browserTz(); if(!bt){ toast("Couldn't detect a time zone."); return; }
+  fillTzSelect(bt); toast("Set to "+bt+" — click Save to apply."); }
+function resetSlots(){ SLOTS=DEFAULT_SLOTS.slice(); renderSlots(); }
 
 /* ---------- admin: user management ---------- */
 async function loadAdmin(){
@@ -564,7 +655,9 @@ function ensureHoverDelegation(){
   if(HOVER_BOUND) return; HOVER_BOUND = true;
   document.body.addEventListener("mouseover", (e)=>{
     const el = e.target.closest(CARD_SEL);
-    if(el && POP_FOR !== el.dataset.id) showPop(el.dataset.id, e);
+    if(!el) return;
+    if(e.target.closest(".predwrap")){ hidePop(); return; }   // prediction shows its own reasoning tooltip
+    if(POP_FOR !== el.dataset.id) showPop(el.dataset.id, e);
   });
   document.body.addEventListener("mousemove", (e)=>{ if(POP_FOR) positionPop(e); });
   document.body.addEventListener("mouseout", (e)=>{
@@ -601,6 +694,12 @@ document.getElementById("authSwitch").addEventListener("click", (e)=>{
 });
 document.getElementById("logoutBtn").onclick = logout;
 document.getElementById("pendingLogout").onclick = logout;
+document.getElementById("tokGen").onclick = genToken;
+document.getElementById("tokRevoke").onclick = revokeToken;
+document.getElementById("tokCopy").onclick = copyToken;
+document.getElementById("prefSave").onclick = savePrefs;
+document.getElementById("tzDetect").onclick = detectTz;
+document.getElementById("slotReset").onclick = resetSlots;
 document.getElementById("provSel").onchange = (e)=>{
   ACTIVE_PROVIDER = e.target.value;
   localStorage.setItem("wc_provider", ACTIVE_PROVIDER);
