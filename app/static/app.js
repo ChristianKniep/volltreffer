@@ -162,7 +162,7 @@ function matchCard(m){
   const chipText = ko ? m.round : m.group;
   return `<div class="m ${m.status==='finished'?'played':''}" style="--heat:${m.excitement.color}" tabindex="0" data-id="${m.id}">
     <div class="row1">
-      <div class="time" style="background:${m.time_color}" title="Slot rating ${m.time_rating}/5 (${m.tz_abbr})"><div class="c">${m.local_time}</div><div class="e">${m.et_time} ET</div></div>
+      <div class="time" style="background:${m.time_color}" title="Slot rating ${m.time_rating}/5 (${m.tz_abbr}) · kickoff ${m.venue_time} ${m.venue_tz_abbr} at the venue"><div class="c">${m.local_time}</div><div class="e">${m.venue_time} ${m.venue_tz_abbr}</div></div>
       <div class="fix">
         ${teamSlot(m.home,m.home_ref,m.home_iso,m.home_score,m.home_pens,winH)}
         ${teamSlot(m.away,m.away_ref,m.away_iso,m.away_score,m.away_pens,winA)}

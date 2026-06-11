@@ -33,6 +33,25 @@ RIVALRY = {
 RMIN, RMAX = 1330, 1877
 ALLOW_REG = os.environ.get("ALLOW_REGISTRATION", "true").lower() in ("1", "true", "yes")
 DEFAULT_TZ = os.environ.get("DEFAULT_TZ", "Europe/Berlin")
+# Host city -> IANA timezone, used to show kickoff in the venue's local time.
+VENUE_TZ = {
+    "Mexico City": "America/Mexico_City",
+    "Zapopan": "America/Mexico_City",      # Guadalajara metro, Central
+    "Monterrey": "America/Monterrey",
+    "Atlanta": "America/New_York",
+    "Toronto": "America/Toronto",
+    "Santa Clara": "America/Los_Angeles",
+    "Inglewood": "America/Los_Angeles",    # Los Angeles
+    "Vancouver": "America/Vancouver",
+    "Seattle": "America/Los_Angeles",
+    "East Rutherford": "America/New_York", # NY/NJ
+    "Foxborough": "America/New_York",      # Boston
+    "Philadelphia": "America/New_York",
+    "Miami Gardens": "America/New_York",
+    "Houston": "America/Chicago",
+    "Kansas City": "America/Chicago",
+    "Arlington": "America/Chicago",        # Dallas
+}
 # how good each local hour (0–23) is by default, 1 (avoid) … 5 (perfect); users customise this.
 DEFAULT_SLOTS = [3, 2, 2, 1, 1, 1, 2, 2, 3, 3, 3, 3,
                  3, 3, 3, 3, 4, 4, 5, 5, 5, 5, 5, 4]
@@ -217,7 +236,10 @@ def _state(user_id, provider_id):
     for m in conn.execute("SELECT * FROM matches ORDER BY kickoff_et, match_no"):
         et = datetime.datetime.strptime(m["kickoff_et"], "%Y-%m-%d %H:%M")
         # kickoff_et is US-Eastern wall-clock (EDT, UTC-4) → UTC instant → user's tz
-        local = (et.replace(tzinfo=datetime.timezone.utc) + datetime.timedelta(hours=4)).astimezone(tz)
+        utc = et.replace(tzinfo=datetime.timezone.utc) + datetime.timedelta(hours=4)
+        local = utc.astimezone(tz)
+        venue_zone = VENUE_TZ.get(m["city"])
+        venue = utc.astimezone(ZoneInfo(venue_zone)) if venue_zone else None
         rating = slots[local.hour]
         h, a = m["home_team"], m["away_team"]
         pred = None
@@ -246,6 +268,8 @@ def _state(user_id, provider_id):
             "local_date": local.strftime("%a %d %b").upper(),
             "local_time": local.strftime("%H:%M"), "et_time": et.strftime("%H:%M"),
             "tz_abbr": local.strftime("%Z"),
+            "venue_time": venue.strftime("%H:%M") if venue else et.strftime("%H:%M"),
+            "venue_tz_abbr": venue.strftime("%Z") if venue else "ET",
             "home_ref": m["home_ref"], "away_ref": m["away_ref"],
             "home": h, "away": a,
             "home_iso": teams[h]["iso"] if h else None,
