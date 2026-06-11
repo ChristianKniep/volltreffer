@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wc2026.fullname" . }}
+  labels:
+    {{- include "wc2026.labels" . | nindent 4 }}
+data:
+  WC_DB: {{ printf "%s/wc2026.db" (trimSuffix "/" .Values.persistence.mountPath) | quote }}
+  ADMIN_USER: {{ .Values.config.adminUser | quote }}
+  ALLOW_REGISTRATION: {{ .Values.config.allowRegistration | quote }}
+  COOKIE_SECURE: {{ .Values.config.cookieSecure | quote }}
+  DEFAULT_TZ: {{ .Values.config.defaultTz | quote }}
+  {{- with .Values.config.fixturesUrl }}
+  FIXTURES_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.teamtipUser }}
+  TEAMTIP_USER: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.teamtipBetgame }}
+  TEAMTIP_BETGAME: {{ . | quote }}
+  {{- end }}
+  {{- range $k, $v := .Values.config.extraEnv }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

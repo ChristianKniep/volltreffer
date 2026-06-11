@@ -1,0 +1,152 @@
+# Default values for the wc2026 chart.
+# This app stores everything in a single SQLite file on a PersistentVolume,
+# so it runs as exactly one replica. Do not raise replicaCount above 1 unless
+# you have migrated the app to a shared database (e.g. Postgres).
+
+# -- Number of app replicas. MUST stay 1 with the SQLite backend (single writer).
+replicaCount: 1
+
+image:
+  # -- Container image repository. Push your build here (see README).
+  repository: ghcr.io/christiankniep/wc2026
+  # -- Image tag. Override per release; "latest" is convenient but not reproducible.
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling from a private registry, e.g. [{name: regcred}]
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount for the app.
+  create: true
+  # -- Name to use; generated from the fullname if empty.
+  name: ""
+  annotations: {}
+
+# Roll the single pod by terminating the old one before starting the new one,
+# so two pods never mount the ReadWriteOnce SQLite volume at the same time.
+strategy:
+  type: Recreate
+
+podAnnotations: {}
+podLabels: {}
+
+# Run as a non-root user; fsGroup makes the mounted data volume writable.
+podSecurityContext:
+  fsGroup: 1000
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  # -- Container port the app listens on (uvicorn).
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: volltreffer.lab.hvk
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: volltreffer.dns.boedde.net
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: wc2026-tls
+  #    hosts:
+  #      - wc2026.example.com
+
+persistence:
+  # -- Persist the SQLite database on a PVC. Strongly recommended.
+  enabled: true
+  # -- Use an existing PVC instead of creating one (set to its name).
+  existingClaim: ""
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  # -- Mount path inside the container; WC_DB points at a file under here.
+  mountPath: /data
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# Application configuration.
+#
+# Non-secret settings go to a ConfigMap; secret settings go to a Secret.
+# WC_DB is derived from persistence.mountPath automatically.
+# ---------------------------------------------------------------------------
+config:
+  # -- Initial admin username (created on first start only).
+  adminUser: "admin"
+  # -- "true" allows public self-registration; "false" makes it invite-only.
+  allowRegistration: "true"
+  # -- Set "true" when serving over HTTPS so cookies get the Secure flag.
+  cookieSecure: "false"
+  # -- Fallback timezone before a user picks their own.
+  defaultTz: "Europe/Berlin"
+  # -- Optional JSON results feed URL (leave empty to disable).
+  fixturesUrl: ""
+  # -- Legacy teamtip migration values (imported once onto admin on first start).
+  teamtipUser: ""
+  teamtipBetgame: ""
+  # -- Extra free-form environment variables (key/value), all treated as non-secret.
+  extraEnv: {}
+
+secrets:
+  # -- Reference an existing Secret instead of creating one from the values below.
+  #    The Secret must contain the same keys this chart would set (see templates/secret.yaml).
+  existingSecret: ""
+  # -- Encrypts stored betting credentials. MUST be long, random, and STABLE.
+  #    Changing it later makes already-saved credentials unreadable.
+  #    Generate: python -c "import secrets;print(secrets.token_urlsafe(48))"
+  appSecretKey: ""
+  # -- Initial admin password (first start only). Change after first login.
+  adminPassword: "change-me"
+  # -- Bearer token allowing automation to update the prediction model via the API.
+  automationToken: ""
+  # -- Optional football-data.org v4 token for auto-pulling results.
+  footballDataToken: ""
+  # -- Optional legacy teamtip bearer token (imported once on first start).
+  teamtipToken: ""
