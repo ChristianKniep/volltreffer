@@ -108,7 +108,7 @@ helm uninstall wc2026 -n wc2026   # PVC is retained (resource-policy: keep)
 | Key | Default | Notes |
 |-----|---------|-------|
 | `replicaCount` | `1` | Keep at 1 (SQLite single writer). |
-| `image.repository` / `image.tag` | `wc2026` / `latest` | Your pushed image. |
+| `image.repository` / `image.tag` | `ghcr.io/christiankniep/wc2026` / `""` | Your pushed image. Empty tag falls back to `appVersion`. |
 | `ingress.enabled` / `ingress.hosts[].host` | `true` / `wc2026.example.com` | External hostname. |
 | `ingress.className` | `""` | e.g. `nginx`, `traefik`. |
 | `persistence.size` | `1Gi` | Database volume size. |

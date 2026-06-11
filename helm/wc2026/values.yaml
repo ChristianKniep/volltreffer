@@ -9,8 +9,8 @@ replicaCount: 1
 image:
   # -- Container image repository. Push your build here (see README).
   repository: ghcr.io/christiankniep/wc2026
-  # -- Image tag. Override per release; "latest" is convenient but not reproducible.
-  tag: "1.0.0"
+  # -- Image tag. Leave empty to use the chart's appVersion ({{ .Chart.AppVersion }}).
+  tag: ""
   pullPolicy: IfNotPresent
 
 # -- Secrets for pulling from a private registry, e.g. [{name: regcred}]
