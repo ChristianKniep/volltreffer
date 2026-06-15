@@ -1,11 +1,16 @@
 "use strict";
-const APP_VERSION = "v16";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v18";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
 const fmtEl = (s)=>{const d=document.createElement("div");d.textContent=s;return d.innerHTML;};
 const attrEsc = (s)=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const flag = (iso)=>iso?`<img class="fl" src="/static/flags/${iso}.svg" alt="">`:"";
+function tvBadge(b){
+  if(!b) return "";
+  const cls = b==="ARD" ? "ard" : (b==="ZDF" ? "zdf" : "both");
+  return `<span class="tv ${cls}" title="Live im Free-TV: ${attrEsc(b)}">📺 ${fmtEl(b)}</span>`;
+}
 let STATE = null;
 let ME = null;
 let ACTIVE_PROVIDER = localStorage.getItem("wc_provider") || "";
@@ -172,6 +177,7 @@ function matchCard(m){
     <div class="meta-line">
       <span class="chip" style="background:${chipColor}">${chipText}</span>
       <span class="venue">${fmtEl(m.venue)} · ${fmtEl(m.city)}</span>
+      ${tvBadge(m.broadcaster)}
     </div>
     ${m.status!=='finished' ? predBar(m.prediction, ko, m.tip) : ""}
     ${m.status==='finished' ? tipLine(m) : ""}

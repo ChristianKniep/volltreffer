@@ -115,6 +115,12 @@ section.view.active{display:block}
 .chip{font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:10px; color:#fff;
   border-radius:4px; padding:1px 6px}
 .venue{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.tv{flex:none; font-family:'Saira Condensed',sans-serif; font-weight:700;
+  font-size:10px; color:#fff; border-radius:4px; padding:1px 6px; white-space:nowrap}
+.meta-line .tv{margin-left:auto}
+.tv.ard{background:#0a3b8c}
+.tv.zdf{background:#d4711b}
+.tv.both{background:linear-gradient(90deg,#0a3b8c 50%,#d4711b 50%)}
 
 /* prediction */
 .pred{margin-top:7px; border-top:1px dashed var(--line); padding-top:6px}

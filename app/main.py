@@ -56,6 +56,28 @@ VENUE_TZ = {
 DEFAULT_SLOTS = [3, 2, 2, 1, 1, 1, 2, 2, 3, 3, 3, 3,
                  3, 3, 3, 3, 4, 4, 5, 5, 5, 5, 5, 4]
 
+# --- German free-to-air (öffentlich-rechtlich) broadcaster per match ----------
+# ARD/ZDF have historically shared the World Cup: they alternate which channel
+# carries the day's games by calendar matchday, and BOTH air every Germany game.
+# This is a deterministic derivation (no per-match list was published yet); it is
+# isolated here and easy to correct once the official ARD/ZDF split is announced.
+# Override individual matches via the BROADCAST_OVERRIDE map (match id -> label).
+GERMANY = "Germany"
+TOURNAMENT_START = datetime.date(2026, 6, 11)  # opener; day 0 of the rota
+BROADCAST_OVERRIDE: dict[str, str] = {}
+
+
+def _broadcaster(match_id, kickoff_et, home, away):
+    """Return the German public-TV station(s) showing this match.
+    Both ARD & ZDF always carry Germany's games; otherwise the day alternates."""
+    if match_id in BROADCAST_OVERRIDE:
+        return BROADCAST_OVERRIDE[match_id]
+    if home == GERMANY or away == GERMANY:
+        return "ARD/ZDF"
+    day = datetime.datetime.strptime(kickoff_et, "%Y-%m-%d %H:%M").date()
+    even = (day - TOURNAMENT_START).days % 2 == 0
+    return "ARD" if even else "ZDF"
+
 app = FastAPI(title="World Cup 2026")
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
@@ -270,6 +292,7 @@ def _state(user_id, provider_id):
             "tz_abbr": local.strftime("%Z"),
             "venue_time": venue.strftime("%H:%M") if venue else et.strftime("%H:%M"),
             "venue_tz_abbr": venue.strftime("%Z") if venue else "ET",
+            "broadcaster": _broadcaster(m["id"], m["kickoff_et"], h, a),
             "home_ref": m["home_ref"], "away_ref": m["away_ref"],
             "home": h, "away": a,
             "home_iso": teams[h]["iso"] if h else None,
