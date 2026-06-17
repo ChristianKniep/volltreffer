@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v18";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v19";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -417,13 +417,25 @@ function provCard(p){
   const status = p.configured
     ? `<span class="pstat ok">connected</span>`
     : `<span class="pstat">not connected</span>`;
+  let tokNote = "";
+  if(p.token_exp){
+    const d = new Date(p.token_exp*1000);
+    const when = d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});
+    tokNote = p.token_expired
+      ? `<p class="toknote err">Token expired — paste a fresh one to keep syncing.</p>`
+      : `<p class="toknote">Token valid until <b>${when}</b>.</p>`;
+  }
+  const groupBtn = (p.id==="teamtip" && p.configured)
+    ? `<button class="btn ghost p-group">Sync group →</button>` : "";
   return `<div class="provcard" data-pid="${p.id}">
     <div class="phead"><h3>${fmtEl(p.label)}</h3>${status}</div>
     <p class="pblurb">${fmtEl(p.blurb||"")}</p>
+    ${tokNote}
     <div class="pfields">${p.fields.map(f=>provField(p.id,f,p.values[f.name])).join("")}</div>
     <div class="pmsg"></div>
     <div class="pacts">
       <button class="btn primary p-save">Save &amp; test</button>
+      ${groupBtn}
       ${p.configured?`<button class="btn ghost p-del">Disconnect</button>`:""}
     </div>
   </div>`;
@@ -443,6 +455,16 @@ function bindProvCards(){
       msg.textContent = d.valid ? (d.message||"Connected.") : ("Saved, but: "+(d.message||"could not verify"));
       msg.className = "pmsg "+(d.valid?"ok":"warn");
       await loadSettings(); await getState();
+    };
+    const grp = card.querySelector(".p-group");
+    if(grp) grp.onclick = async ()=>{
+      msg.textContent = "Importing group…"; msg.className = "pmsg";
+      const r = await fetch("/api/teamtip/sync-group",{method:"POST"});
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok){ msg.textContent = d.detail||"Group sync failed."; msg.className="pmsg err"; return; }
+      if(d.errors && d.errors.length){ msg.textContent = d.errors.join(" "); msg.className="pmsg warn"; }
+      else { msg.textContent = `Imported ${d.members} members, ${d.tips} tips.`; msg.className="pmsg ok"; }
+      await loadLeaderboard();
     };
     const del = card.querySelector(".p-del");
     if(del) del.onclick = async ()=>{
@@ -603,7 +625,7 @@ async function loadLeaderboard(){
   const rows = d.standings.map(p=>`
     <tr class="${p.is_self?'self':''}">
       <td class="rk">${p.rank}</td>
-      <td class="pl">${fmtEl(p.username)}${p.is_self?' <span class="youtag">you</span>':''}</td>
+      <td class="pl">${fmtEl(p.username)}${p.is_self?' <span class="youtag">you</span>':''}${p.kind==="teamtip"?' <span class="ttag">teamtip</span>':''}</td>
       <td class="pts">${p.points}</td>
       <td>${p.exact}</td><td>${p.goaldiff}</td><td>${p.tendency}</td><td>${p.miss}</td>
       <td class="tn">${p.tips}</td>
@@ -615,6 +637,100 @@ async function loadLeaderboard(){
         <th title="Correct tendency">T</th><th title="Missed">✗</th>
         <th title="Tips on played matches">n</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
+}
+
+/* ---------- progress charts ---------- */
+let PROG_DATA = null;       // {matchdays, series}
+let PROG_METRIC = "rank";   // "rank" | "points"
+let PROG_HIDDEN = new Set();
+const PROG_COLORS = ["#C8102E","#0E7C7B","#1F6FB2","#E0561F","#6A359C","#2E8B57",
+  "#A61E4D","#5E7A1E","#2C3E8C","#8B4A2B","#CC6B1F","#A9821B","#3D5A6C","#B3122B"];
+
+async function loadProgress(){
+  const r = await fetch("/api/progress");
+  if(!r.ok) return;
+  PROG_DATA = await r.json();
+  const empty = !PROG_DATA.matchdays.length;
+  document.getElementById("progEmpty").hidden = !empty;
+  document.getElementById("progChart").style.display = empty ? "none" : "";
+  if(empty){ document.getElementById("progLegend").innerHTML=""; return; }
+  renderProgLegend();
+  drawProgress();
+}
+
+function progColor(i){ return PROG_COLORS[i % PROG_COLORS.length]; }
+
+function renderProgLegend(){
+  const leg = document.getElementById("progLegend");
+  leg.innerHTML = PROG_DATA.series.map((s,i)=>{
+    const off = PROG_HIDDEN.has(s.subject_id) ? " off" : "";
+    return `<button class="legitem${off}" data-sid="${fmtEl(s.subject_id)}">
+      <span class="swatch" style="background:${progColor(i)}"></span>${fmtEl(s.name)}</button>`;
+  }).join("");
+  leg.querySelectorAll(".legitem").forEach(b=>{
+    b.onclick = ()=>{
+      const sid = b.dataset.sid;
+      if(PROG_HIDDEN.has(sid)) PROG_HIDDEN.delete(sid); else PROG_HIDDEN.add(sid);
+      b.classList.toggle("off");
+      drawProgress();
+    };
+  });
+}
+
+function drawProgress(){
+  if(!PROG_DATA || !PROG_DATA.matchdays.length) return;
+  const cv = document.getElementById("progChart");
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height;
+  const padL = 44, padR = 16, padT = 16, padB = 34;
+  ctx.clearRect(0,0,W,H);
+  const mds = PROG_DATA.matchdays;
+  const isRank = PROG_METRIC === "rank";
+  // value range
+  let vmin = Infinity, vmax = -Infinity;
+  PROG_DATA.series.forEach(s=>{
+    mds.forEach(md=>{ const v=s[PROG_METRIC][md]; if(v!=null){ vmin=Math.min(vmin,v); vmax=Math.max(vmax,v);} });
+  });
+  if(!isFinite(vmin)){ return; }
+  if(isRank){ vmin=1; vmax=Math.max(vmax, PROG_DATA.series.length); }
+  else { vmin=0; vmax=Math.max(vmax,1); }
+  const xN = Math.max(mds.length-1, 1);
+  const X = i => padL + (W-padL-padR) * (i/xN);
+  // rank: smaller is better -> invert so #1 is at the top
+  const Y = v => isRank
+    ? padT + (H-padT-padB) * ((v-vmin)/(vmax-vmin||1))
+    : padT + (H-padT-padB) * (1 - (v-vmin)/(vmax-vmin||1));
+  // gridlines + y labels
+  ctx.strokeStyle="#e6e0d6"; ctx.fillStyle="#8a8170"; ctx.font="11px system-ui,sans-serif";
+  const ticks = 5;
+  for(let t=0;t<=ticks;t++){
+    const v = vmin + (vmax-vmin)*(t/ticks);
+    const y = Y(v);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillText(isRank ? Math.round(v) : Math.round(v), 6, y+4);
+  }
+  // x labels (matchday = # finished)
+  ctx.textAlign="center";
+  mds.forEach((md,i)=>{ ctx.fillText(md, X(i), H-12); });
+  ctx.textAlign="left";
+  ctx.fillText("matches played", padL, H-1);
+  // lines
+  PROG_DATA.series.forEach((s,i)=>{
+    if(PROG_HIDDEN.has(s.subject_id)) return;
+    ctx.strokeStyle = progColor(i); ctx.lineWidth = s.kind==="user" ? 3 : 1.8;
+    ctx.beginPath(); let started=false;
+    mds.forEach((md,xi)=>{
+      const v = s[PROG_METRIC][md]; if(v==null) return;
+      const x=X(xi), y=Y(v);
+      if(!started){ ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    // end dots
+    mds.forEach((md,xi)=>{
+      const v=s[PROG_METRIC][md]; if(v==null) return;
+      ctx.fillStyle=progColor(i); ctx.beginPath(); ctx.arc(X(xi),Y(v),2.6,0,7); ctx.fill();
+    });
+  });
 }
 
 /* ---------- per-game tips hover popover ---------- */
@@ -681,13 +797,21 @@ document.querySelectorAll("nav.tabs button").forEach(b=>{
   b.onclick = ()=>{
     document.querySelectorAll("nav.tabs button").forEach(x=>x.setAttribute("aria-selected", x===b));
     document.querySelectorAll("section.view").forEach(v=>v.classList.toggle("active", v.id===b.dataset.view));
+    if(b.dataset.view==="progress") loadProgress();
   };
 });
-document.querySelectorAll("nav.subtabs button").forEach(b=>{
+document.querySelectorAll("#schedSub button").forEach(b=>{
   b.onclick = ()=>{
-    document.querySelectorAll("nav.subtabs button").forEach(x=>x.setAttribute("aria-selected", x===b));
+    document.querySelectorAll("#schedSub button").forEach(x=>x.setAttribute("aria-selected", x===b));
     document.getElementById("schedUpcoming").classList.toggle("active", b.dataset.sub==="upcoming");
     document.getElementById("schedPast").classList.toggle("active", b.dataset.sub==="past");
+  };
+});
+document.querySelectorAll("#progSub button").forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll("#progSub button").forEach(x=>x.setAttribute("aria-selected", x===b));
+    PROG_METRIC = b.dataset.prog;
+    drawProgress();
   };
 });
 document.getElementById("updateBtn").onclick = runUpdate;

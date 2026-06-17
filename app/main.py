@@ -192,24 +192,24 @@ def _finished_results(conn):
                 "SELECT id,home_score,away_score FROM matches WHERE status='finished'")}
 
 
-def _leaderboard(conn, me_id):
-    names = _approved_usernames(conn)
-    results = _finished_results(conn)
-    tips = _user_match_tips(conn)
-    rows = []
-    for uid, username in names.items():
-        agg = {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0, "miss": 0, "tips": 0}
-        for mid, (th, ta) in tips.get(uid, {}).items():
-            if mid not in results:
-                continue
-            cls = SC.classify(th, ta, *results[mid])
-            agg[cls] += 1
-            agg["points"] += SC.POINTS[cls]
-            agg["tips"] += 1
-        rows.append({"user_id": uid, "username": username, "is_self": uid == me_id, **agg})
+def _score_tips(tips_for_subject, results):
+    """Aggregate one subject's tips into a points/outcome breakdown."""
+    agg = {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0, "miss": 0, "tips": 0}
+    for mid, (th, ta) in tips_for_subject.items():
+        if mid not in results:
+            continue
+        cls = SC.classify(th, ta, *results[mid])
+        agg[cls] += 1
+        agg["points"] += SC.POINTS[cls]
+        agg["tips"] += 1
+    return agg
+
+
+def _rank_rows(rows):
+    """Sort by points then tie-breakers and assign competition ranks (ties share
+    a rank). Mutates and returns rows."""
     rows.sort(key=lambda r: (-r["points"], -r["exact"], -r["goaldiff"],
                              -r["tendency"], r["username"].lower()))
-    # standard competition ranking (ties share a rank)
     rank = 0
     prev = None
     for i, r in enumerate(rows, 1):
@@ -219,6 +219,43 @@ def _leaderboard(conn, me_id):
             prev = keyv
         r["rank"] = rank
     return rows
+
+
+def _leaderboard(conn, me_id):
+    results = _finished_results(conn)
+    user_tips = _user_match_tips(conn)
+    rows = []
+    # real app users
+    for uid, username in _approved_usernames(conn).items():
+        agg = _score_tips(user_tips.get(uid, {}), results)
+        rows.append({"kind": "user", "user_id": uid, "username": username,
+                     "is_self": uid == me_id, **agg})
+    # teamtip ghost members (read-only, imported from the betgame)
+    member_tips = db.get_member_tips(conn)
+    for m in db.get_members(conn):
+        key = (m["betgame_id"], m["fk_user"])
+        agg = _score_tips(member_tips.get(key, {}), results)
+        rows.append({"kind": "teamtip",
+                     "user_id": f"{m['betgame_id']}:{m['fk_user']}",
+                     "username": m["display_name"], "is_self": False, **agg})
+    return _rank_rows(rows)
+
+
+def _snapshot_standings(conn):
+    """Persist the current standings as a snapshot tagged by matchday (= number
+    of finished matches). Idempotent per matchday. Source of truth for graphs."""
+    matchday = conn.execute(
+        "SELECT COUNT(*) c FROM matches WHERE status='finished'").fetchone()["c"]
+    if matchday == 0:
+        return 0  # nothing scored yet — no meaningful snapshot
+    rows = _leaderboard(conn, me_id=None)
+    db.write_snapshot(conn, matchday, [{
+        "subject_kind": r["kind"], "subject_id": r["user_id"],
+        "display_name": r["username"], "points": r["points"],
+        "exact": r["exact"], "goaldiff": r["goaldiff"], "tendency": r["tendency"],
+        "betcount": r["tips"], "rank": r["rank"],
+    } for r in rows])
+    return matchday
 
 
 # ---------- state ----------
@@ -618,7 +655,15 @@ def _provider_view(conn, user_id, cls):
             summary[f.name] = "********" if saved.get(f.name) else ""
         else:
             summary[f.name] = saved.get(f.name, "")
-    return {**cls.describe(), "configured": bool(saved), "values": summary}
+    view = {**cls.describe(), "configured": bool(saved), "values": summary}
+    # surface JWT expiry so the UI can warn before a teamtip token lapses
+    if cls.id == "teamtip" and saved.get("token"):
+        from .providers.teamtip import token_exp
+        exp = token_exp(saved.get("token"))
+        if exp:
+            view["token_exp"] = exp
+            view["token_expired"] = exp <= datetime.datetime.utcnow().timestamp()
+    return view
 
 
 @app.get("/api/providers")
@@ -816,7 +861,11 @@ def api_update(user=Depends(auth.current_user)):
             prov = providers.get_provider(pid)
             creds = db.get_provider_creds(conn, user["id"], pid)
             synced[pid] = prov.sync_tips(conn, user["id"], creds)
+            # pull the whole teamtip betgame too, so ghost members stay current
+            if pid == "teamtip" and hasattr(prov, "sync_group"):
+                synced["teamtip_group"] = prov.sync_group(conn, user["id"], creds)
         summary["providers"] = synced
+        summary["snapshot_matchday"] = _snapshot_standings(conn)
     finally:
         conn.close()
     return summary
@@ -825,6 +874,47 @@ def api_update(user=Depends(auth.current_user)):
 @app.post("/api/teamtip/sync")
 def api_teamtip_sync(user=Depends(auth.current_user)):
     return providers_sync("teamtip", user)
+
+
+@app.post("/api/teamtip/sync-group")
+def api_teamtip_sync_group(user=Depends(auth.current_user)):
+    """Import every betgame member (names + scorelines) as read-only ghosts,
+    then snapshot the standings for the progress graphs."""
+    prov = providers.get_provider("teamtip")
+    if not prov or not hasattr(prov, "sync_group"):
+        raise HTTPException(400, "teamtip group sync unavailable")
+    conn = db.connect()
+    try:
+        creds = db.get_provider_creds(conn, user["id"], "teamtip")
+        if not creds:
+            raise HTTPException(400, "no teamtip credentials saved — add them in Settings")
+        out = prov.sync_group(conn, user["id"], creds)
+        out["snapshot_matchday"] = _snapshot_standings(conn)
+    finally:
+        conn.close()
+    return out
+
+
+@app.get("/api/progress")
+def api_progress(user=Depends(auth.current_user)):
+    """Per-subject series across matchdays (points + rank) for the charts."""
+    conn = db.connect()
+    try:
+        snaps = db.get_snapshots(conn)
+    finally:
+        conn.close()
+    matchdays = sorted({s["matchday"] for s in snaps})
+    series = {}
+    for s in snaps:
+        sid = s["subject_id"]
+        e = series.setdefault(sid, {
+            "subject_id": sid, "kind": s["subject_kind"],
+            "name": s["display_name"], "points": {}, "rank": {},
+        })
+        e["name"] = s["display_name"]
+        e["points"][s["matchday"]] = s["points"]
+        e["rank"][s["matchday"]] = s["rank"]
+    return {"matchdays": matchdays, "series": list(series.values())}
 
 
 @app.post("/api/reset")

@@ -116,6 +116,7 @@ helm uninstall wc2026 -n wc2026   # PVC is retained (resource-policy: keep)
 | `config.allowRegistration` | `"true"` | `"false"` = invite-only. |
 | `config.cookieSecure` | `"false"` | Set `"true"` behind HTTPS. |
 | `config.defaultTz` | `Europe/Berlin` | Fallback timezone. |
+| `config.scoreExact` / `config.scoreGoaldiff` / `config.scoreTendency` | `"3"` / `"2"` / `"1"` | Leaderboard points. Defaults match the teamtip.net betgame the group import mirrors; classic German-pool is `4`/`3`/`2`. |
 | `secrets.appSecretKey` | `""` | Auto-generated & preserved if empty. **Keep stable.** |
 | `secrets.adminPassword` | `change-me` | First-start admin password. |
 | `secrets.existingSecret` | `""` | Use a pre-created Secret instead. |

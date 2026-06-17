@@ -19,7 +19,10 @@ services:
       # DEFAULT_TZ: "Europe/Berlin"  # fallback tz before a user picks their own (auto-detected from their browser)
       # --- let an agent/automation update the prediction model via the API ---
       # AUTOMATION_TOKEN: "<long random string>"   # Bearer token for /api/ratings + overrides
-      # SCORE_EXACT: "4"   SCORE_GOALDIFF: "3"   SCORE_TENDENCY: "2"   # leaderboard points
+      # leaderboard points — teamtip.net's betgame uses 3/2/1, so we match it:
+      SCORE_EXACT: "3"
+      SCORE_GOALDIFF: "2"
+      SCORE_TENDENCY: "1"
       # --- optional: let "Update results" pull finished games automatically ---
       # A) simple JSON feed you control (list of {id, home_score, away_score, home_pens?, away_pens?})
       # FIXTURES_URL: "https://example.com/wc2026-results.json"

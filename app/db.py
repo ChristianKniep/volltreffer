@@ -80,6 +80,38 @@ CREATE TABLE IF NOT EXISTS user_pred_overrides (
   updated_at TEXT,
   PRIMARY KEY (user_id, match_id)
 );
+CREATE TABLE IF NOT EXISTS teamtip_members (
+  betgame_id    TEXT NOT NULL,
+  fk_user       INTEGER NOT NULL,
+  display_name  TEXT NOT NULL,
+  owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  first_seen    TEXT,
+  last_seen     TEXT,
+  PRIMARY KEY (betgame_id, fk_user)
+);
+CREATE TABLE IF NOT EXISTS member_tips (
+  betgame_id  TEXT NOT NULL,
+  fk_user     INTEGER NOT NULL,
+  match_id    TEXT NOT NULL,
+  home        INTEGER NOT NULL,
+  away        INTEGER NOT NULL,
+  updated_at  TEXT,
+  PRIMARY KEY (betgame_id, fk_user, match_id)
+);
+CREATE TABLE IF NOT EXISTS standings_snapshots (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  taken_at     TEXT NOT NULL,        -- ISO UTC timestamp of the snapshot
+  matchday     INTEGER NOT NULL,     -- # of finished matches at snapshot time
+  subject_kind TEXT NOT NULL,        -- 'user' | 'teamtip'
+  subject_id   TEXT NOT NULL,        -- users.id (str) or 'betgame:fk_user'
+  display_name TEXT NOT NULL,
+  points       INTEGER NOT NULL,
+  exact        INTEGER NOT NULL,
+  goaldiff     INTEGER NOT NULL,
+  tendency     INTEGER NOT NULL,
+  betcount     INTEGER NOT NULL,
+  rank         INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -336,3 +368,63 @@ def set_slot_ratings(conn, user_id, slots):
     conn.execute("UPDATE users SET slot_ratings=? WHERE id=?",
                  (json.dumps(slots), user_id))
     conn.commit()
+
+
+# ---------- teamtip group members (read-only ghost accounts) ----------
+def upsert_member(conn, betgame_id, fk_user, display_name, owner_user_id):
+    now = _now()
+    conn.execute(
+        """INSERT INTO teamtip_members(betgame_id,fk_user,display_name,owner_user_id,
+             first_seen,last_seen) VALUES(?,?,?,?,?,?)
+           ON CONFLICT(betgame_id,fk_user) DO UPDATE SET
+             display_name=excluded.display_name,
+             owner_user_id=excluded.owner_user_id,
+             last_seen=excluded.last_seen""",
+        (str(betgame_id), int(fk_user), display_name, owner_user_id, now, now))
+
+
+def upsert_member_tip(conn, betgame_id, fk_user, match_id, home, away):
+    conn.execute(
+        """INSERT INTO member_tips(betgame_id,fk_user,match_id,home,away,updated_at)
+           VALUES(?,?,?,?,?,?)
+           ON CONFLICT(betgame_id,fk_user,match_id) DO UPDATE SET
+             home=excluded.home, away=excluded.away, updated_at=excluded.updated_at""",
+        (str(betgame_id), int(fk_user), match_id, int(home), int(away), _now()))
+
+
+def get_members(conn) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT betgame_id,fk_user,display_name FROM teamtip_members")]
+
+
+def get_member_tips(conn) -> dict:
+    """{(betgame_id, fk_user): {match_id: (home, away)}}"""
+    out = {}
+    for r in conn.execute(
+            "SELECT betgame_id,fk_user,match_id,home,away FROM member_tips"):
+        out.setdefault((r["betgame_id"], r["fk_user"]), {})[r["match_id"]] = \
+            (r["home"], r["away"])
+    return out
+
+
+# ---------- standings snapshots (progress over the tournament) ----------
+def write_snapshot(conn, matchday, rows):
+    """rows = list of dicts with keys subject_kind, subject_id, display_name,
+    points, exact, goaldiff, tendency, betcount, rank. One snapshot batch."""
+    now = _now()
+    # idempotent per matchday: replace any existing snapshot at this matchday so
+    # repeated syncs on the same matchday don't pile up duplicate series points.
+    conn.execute("DELETE FROM standings_snapshots WHERE matchday=?", (int(matchday),))
+    conn.executemany(
+        """INSERT INTO standings_snapshots(taken_at,matchday,subject_kind,subject_id,
+             display_name,points,exact,goaldiff,tendency,betcount,rank)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        [(now, int(matchday), r["subject_kind"], str(r["subject_id"]),
+          r["display_name"], r["points"], r["exact"], r["goaldiff"],
+          r["tendency"], r["betcount"], r["rank"]) for r in rows])
+    conn.commit()
+
+
+def get_snapshots(conn) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM standings_snapshots ORDER BY matchday,rank")]

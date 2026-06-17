@@ -128,6 +128,11 @@ config:
   defaultTz: "Europe/Berlin"
   # -- Optional JSON results feed URL (leave empty to disable).
   fixturesUrl: ""
+  # -- Leaderboard scoring scheme. Defaults to teamtip.net's betgame scheme (3/2/1),
+  #    which the imported group members are scored under. Classic German-pool is 4/3/2.
+  scoreExact: "3"
+  scoreGoaldiff: "2"
+  scoreTendency: "1"
   # -- Legacy teamtip migration values (imported once onto admin on first start).
   teamtipUser: ""
   teamtipBetgame: ""

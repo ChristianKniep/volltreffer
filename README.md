@@ -60,6 +60,22 @@ DevTools → Network → any `/bg_bet` request → Request Headers → copy the
 when sync reports it was rejected. Use only your own account; these are private
 endpoints, so mind teamtip's ToS and your pool's fair-play rules.
 
+The Settings card shows the token's **expiry date** (decoded from the JWT) and
+warns once it lapses. teamtip tokens are stateless JWTs with no refresh — you just
+re-paste a fresh one (roughly every ~10 days). Snapshots mean a lapsed token only
+pauses new data collection; nothing already recorded is lost.
+
+### Mirroring the whole teamtip group
+
+**Sync group** (button on the teamtip Settings card, or `POST /api/teamtip/sync-group`)
+imports **every member of your betgame** as a read-only "ghost" account — their
+nicknames from `/bg_v_ranking_16` and their actual per-match scorelines from
+`/bg_bet` (teamtip's row-level security lets co-members read these). Ghosts are
+scored with *your* scheme and ranked alongside real app users in the Leaderboard
+(marked `teamtip`). Nothing is ever written on a member's behalf. Group import also
+runs automatically as part of **Update results**, and each run snapshots the
+standings to power the **Progress** tab (rank- and points-over-time charts).
+
 ## Entering results
 
 Both paths immediately recompute standings and advance the bracket:
@@ -71,13 +87,15 @@ Both paths immediately recompute standings and advance the bracket:
 
 ## Scoring
 
-Defined in `app/score.py`, the standard German-pool scheme (overridable via env):
+Defined in `app/score.py`, overridable via env. The bundled `docker-compose.yml`
+is set to **3 / 2 / 1** to match the teamtip.net betgame this pool mirrors (verified
+against teamtip's own `points_total`); the classic German-pool default is 4 / 3 / 2.
 
 | Outcome | Points | env |
 |---|---|---|
-| Exact score | 4 | `SCORE_EXACT` |
-| Correct goal difference | 3 | `SCORE_GOALDIFF` |
-| Correct tendency (right winner/draw) | 2 | `SCORE_TENDENCY` |
+| Exact score | 3 | `SCORE_EXACT` |
+| Correct goal difference | 2 | `SCORE_GOALDIFF` |
+| Correct tendency (right winner/draw) | 1 | `SCORE_TENDENCY` |
 | Miss | 0 | — |
 
 A correct non-exact draw (you tipped 1–1, it ended 2–2) counts as goal difference.
@@ -123,7 +141,9 @@ For an OpenCode-specific, empty-directory walkthrough see
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/state?provider=` | teams, standings, matches (prediction, your tip for the active backend) |
-| `GET` | `/api/leaderboard` | pool standings across played matches |
+| `GET` | `/api/leaderboard` | pool standings (real users + teamtip ghosts) across played matches |
+| `POST` | `/api/teamtip/sync-group` | import all betgame members as read-only ghosts + snapshot |
+| `GET` | `/api/progress` | per-subject rank/points series across matchdays (for the charts) |
 | `GET` | `/api/match/{id}/tips` | every player's tip for a game (revealed after kickoff) |
 | `GET/PUT` | `/api/ratings` | read / update team power ratings (automation token or admin) |
 | `POST/DELETE` | `/api/match/{id}/prediction` | set / clear a shared per-match prediction override |

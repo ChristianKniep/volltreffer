@@ -355,6 +355,20 @@ table.tbl td.pts{font-weight:700}
 .lbtbl tr.self{background:rgba(200,16,46,.07)}
 .youtag{font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:#fff;
   background:var(--accent); border-radius:999px; padding:1px 6px; margin-left:6px}
+.ttag{font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);
+  background:var(--tile); border:1px solid var(--line); border-radius:999px; padding:1px 6px; margin-left:6px}
+
+/* ---------- progress charts ---------- */
+.chartwrap{background:var(--tile); border:1px solid var(--line); border-radius:12px;
+  padding:10px; overflow-x:auto}
+#progChart{max-width:100%; height:auto; display:block}
+.charlegend{display:flex; gap:6px; flex-wrap:wrap; margin-top:12px}
+.legitem{display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;
+  background:var(--tile); border:1px solid var(--line); border-radius:999px; padding:3px 10px; color:var(--ink)}
+.legitem .swatch{width:11px; height:11px; border-radius:50%; flex:none}
+.legitem.off{opacity:.4; text-decoration:line-through}
+.toknote{font-size:12px; color:var(--ink2); margin:2px 0 8px}
+.toknote.err{color:var(--accent); font-weight:600}
 
 /* ---------- per-game tips popover ---------- */
 .tippop{position:fixed; z-index:60; pointer-events:none; min-width:170px; max-width:240px;

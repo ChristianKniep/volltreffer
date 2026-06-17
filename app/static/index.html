@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=18">
+<link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body>
 <header class="top">
@@ -32,6 +32,7 @@
     <button role="tab" aria-selected="false" data-view="groups">Groups</button>
     <button role="tab" aria-selected="false" data-view="bracket">Bracket</button>
     <button role="tab" aria-selected="false" data-view="leaderboard">Leaderboard</button>
+    <button role="tab" aria-selected="false" data-view="progress">Progress</button>
     <button role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button role="tab" aria-selected="false" data-view="admin" id="adminTab" hidden>Admin</button>
     <button role="tab" aria-selected="false" data-view="instructions">Instructions</button>
@@ -91,6 +92,17 @@
     <div class="lblegend" id="lbLegend"></div>
     <div class="lbtable" id="lbTable"></div>
     <p class="note">Points: exact score, correct goal difference, or correct tendency (right winner/draw). A correct non-exact draw counts as goal difference. Hover any match (after kickoff) to see everyone's tip for that game.</p>
+  </section>
+
+  <section class="view" id="progress" role="tabpanel">
+    <div class="viewhead"><h2>Progress</h2><p>Rank and points over the tournament · snapshots taken on every results update</p></div>
+    <nav class="subtabs" id="progSub" role="tablist">
+      <button role="tab" data-prog="rank" aria-selected="true">Rank over time</button>
+      <button role="tab" data-prog="points" aria-selected="false">Points over time</button>
+    </nav>
+    <div class="chartwrap"><canvas id="progChart" width="900" height="460"></canvas></div>
+    <div class="charlegend" id="progLegend"></div>
+    <p class="note" id="progEmpty" hidden>No snapshots yet. Run <b>Update results</b> (or sync the teamtip group) at least once to start recording progress.</p>
   </section>
 
   <section class="view" id="settings" role="tabpanel">
@@ -197,6 +209,6 @@ update my prediction for that match. Afterwards, show me the diff.</code></pre>
 
 <div id="toast"></div>
 <div id="tipPop" class="tippop" hidden></div>
-<script src="/static/app.js?v=18"></script>
+<script src="/static/app.js?v=19"></script>
 </body>
 </html>

@@ -14,6 +14,7 @@ locally, so they stay visible after the bearer token later expires.
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 import urllib.request
@@ -22,6 +23,8 @@ from . import BetProvider, CredField, register
 
 DEFAULT_BASE = "https://teamtip.net"
 DEFAULT_SCHEDULE = "/schedule/matches_139_16.json"
+DEFAULT_COMPETITION = "139"
+RANKING_VIEW = "/bg_v_ranking_16"
 
 DE2EN = {
     "Algerien": "Algeria", "Argentinien": "Argentina", "Australien": "Australia",
@@ -98,6 +101,24 @@ def _now():
     return dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
 
+def token_exp(token):
+    """Decode a JWT's `exp` (seconds since epoch) without verifying the signature.
+    Display-only — lets the UI warn before a token lapses. Returns None on any
+    parse failure."""
+    if not token:
+        return None
+    raw = token.split()[-1] if token.lower().startswith("bearer ") else token
+    parts = raw.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+        return int(data["exp"]) if "exp" in data else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @register
 class TeamtipProvider(BetProvider):
     id = "teamtip"
@@ -113,6 +134,9 @@ class TeamtipProvider(BetProvider):
                   placeholder="454596"),
         CredField("fk_betgame", "Betgame / round ID (fk_betgame)", type="text",
                   placeholder="150936"),
+        CredField("fk_competition", "Competition ID (fk_competition)", type="text",
+                  required=False, placeholder=DEFAULT_COMPETITION,
+                  help="Needed for group import. Leave blank for the default (139 = WC 2026)."),
         CredField("base", "Base URL", type="text", required=False,
                   placeholder=DEFAULT_BASE,
                   help="Leave blank for the default teamtip.net."),
@@ -226,6 +250,72 @@ class TeamtipProvider(BetProvider):
         _upsert_tip(conn, user_id, self.id, match_id, home, away, _now())
         conn.commit()
         out.update(ok=True, fk_match=fk_match, status=status, home=home, away=away)
+        return out
+
+    # ---- group import (all betgame members, read-only) ----
+    @staticmethod
+    def _http_all_tips(base, bg, token):
+        """Every member's scorelines for the betgame (no fk_user filter).
+        teamtip's row-level security permits co-members to read these."""
+        return _http(f"{base}/bg_bet?select=fk_user,fk_match,goalshome,goalsguest"
+                     f"&fk_betgame=eq.{bg}&limit=15000", token=token)
+
+    @staticmethod
+    def _http_ranking(base, bg, comp, token):
+        return _http(f"{base}{RANKING_VIEW}?select=fk_user,user_name,points_total,"
+                     f"exact,goaldiff,tendency,betcount,position"
+                     f"&fk_betgame=eq.{bg}&fk_competition=eq.{comp}"
+                     f"&order=position.asc&limit=15000", token=token)
+
+    def sync_group(self, conn, owner_user_id, creds):
+        """Import every betgame member (names + raw scorelines) as read-only
+        ghost accounts, reusing the owner's stored token."""
+        from .. import db  # local import avoids a circular import at module load
+        out = {"source": self.id, "members": 0, "tips": 0, "skipped": 0, "errors": []}
+        token, _uid, bg, base = self._cfg(creds)
+        comp = str(creds.get("fk_competition") or DEFAULT_COMPETITION)
+        if not token or not bg:
+            out["errors"].append("teamtip credentials incomplete (token + betgame ID).")
+            return out
+        try:
+            schedule = _http(self._schedule_url(base))
+            ranking = self._http_ranking(base, bg, comp, token)
+            tips = self._http_all_tips(base, bg, token)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e)
+            if "401" in msg or "403" in msg:
+                msg = "token rejected (expired?) — paste a fresh one in Settings."
+            out["errors"].append(f"teamtip group fetch failed: {msg}")
+            return out
+
+        for m in ranking:
+            db.upsert_member(conn, bg, m["fk_user"],
+                             (m.get("user_name") or f"user {m['fk_user']}").strip(),
+                             owner_user_id)
+            out["members"] += 1
+
+        tt = _tt_schedule_index(schedule)
+        ours = _our_match_index(conn)
+        for t in tips:
+            if t.get("goalshome") is None or t.get("goalsguest") is None:
+                continue
+            key = tt.get(t["fk_match"])
+            mid = ours.get(key) if key else None
+            if not mid and key:  # tolerate a date off-by-one
+                for d in (-1, 1):
+                    alt = ((dt.date.fromisoformat(key[0]) + dt.timedelta(days=d)).isoformat(),
+                           key[1])
+                    mid = ours.get(alt)
+                    if mid:
+                        break
+            if mid:
+                db.upsert_member_tip(conn, bg, t["fk_user"], mid,
+                                     t["goalshome"], t["goalsguest"])
+                out["tips"] += 1
+            else:
+                out["skipped"] += 1
+        conn.commit()
+        out["betgame_id"] = str(bg)
         return out
 
     @staticmethod
