@@ -5,7 +5,7 @@ type: application
 # Chart version — bump on every release so Flux re-packages and upgrades.
 version: 0.4.0
 # Version of the app this chart deploys (informational).
-appVersion: "1.3.0"
+appVersion: "1.4.0"
 home: https://github.com/qnib/wc2026
 sources:
   - https://github.com/qnib/wc2026
