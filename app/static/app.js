@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v24";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v25";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -14,6 +14,8 @@ function tvBadge(b){
 let STATE = null;
 let ME = null;
 let ACTIVE_PROVIDER = localStorage.getItem("wc_provider") || "";
+// which accounts to show in Leaderboard & By-matchday: ghosts | both | local
+let ACCOUNT_VIEW = localStorage.getItem("wc_acct") || "ghosts";
 
 async function getState(){
   const q = ACTIVE_PROVIDER ? `?provider=${encodeURIComponent(ACTIVE_PROVIDER)}` : "";
@@ -627,7 +629,7 @@ async function adminAction(url, opts, okMsg){
 
 /* ---------- leaderboard ---------- */
 async function loadLeaderboard(){
-  const r = await fetch("/api/leaderboard");
+  const r = await fetch("/api/leaderboard?view="+encodeURIComponent(ACCOUNT_VIEW));
   if(!r.ok) return;
   const d = await r.json();
   const s = d.scheme;
@@ -683,7 +685,7 @@ async function loadMatchdays(){
 }
 async function loadMatchdayGrid(){
   MD_SEL = document.getElementById("mdSel").value || MD_SEL;
-  const r = await fetch(`/api/matchday/${encodeURIComponent(MD_SEL)}`);
+  const r = await fetch(`/api/matchday/${encodeURIComponent(MD_SEL)}?view=${encodeURIComponent(ACCOUNT_VIEW)}`);
   if(!r.ok){ document.getElementById("mdTable").innerHTML = `<p class="note">Couldn't load this matchday.</p>`; return; }
   renderMatchdayGrid(await r.json());
 }
@@ -933,6 +935,22 @@ document.body.addEventListener("click", (e)=>{
   const g = e.target.closest(".p-group");
   if(g){ e.preventDefault(); syncTeamtipGroup(g); }
 });
+// account-view toggle (teamtip / both / local) — global, persisted, re-renders views
+function reflectAcctSel(){
+  document.querySelectorAll("#acctSel button").forEach(b=>
+    b.classList.toggle("on", b.dataset.acct===ACCOUNT_VIEW));
+}
+document.querySelectorAll("#acctSel button").forEach(b=>{
+  b.onclick = async ()=>{
+    if(ACCOUNT_VIEW===b.dataset.acct) return;
+    ACCOUNT_VIEW = b.dataset.acct;
+    localStorage.setItem("wc_acct", ACCOUNT_VIEW);
+    reflectAcctSel();
+    await loadLeaderboard();
+    if(MD_LIST) await loadMatchdayGrid();
+  };
+});
+reflectAcctSel();
 ensureHoverDelegation();
 setAuthMode("login");
 checkAuth();

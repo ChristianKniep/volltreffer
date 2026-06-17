@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=24">
+<link rel="stylesheet" href="/static/style.css?v=25">
 </head>
 <body>
 <header class="top">
@@ -21,6 +21,11 @@
       <select id="provSel" title="Which betting backend's tips to show"></select>
     </label>
     <div class="meta-mini" id="metaMini">Loading…</div>
+    <div class="acctsel" id="acctSel" role="group" aria-label="Which accounts to show" title="Which accounts to show in Leaderboard & By-matchday">
+      <button data-acct="ghosts" class="on">teamtip</button>
+      <button data-acct="both">both</button>
+      <button data-acct="local">local</button>
+    </div>
     <button class="btn" id="updateBtn" title="Fetch finished results and sync your tips">Update results</button>
     <span class="userbox" id="userBox" hidden>
       <span class="who" id="whoami"></span>
@@ -217,6 +222,6 @@ update my prediction for that match. Afterwards, show me the diff.</code></pre>
 
 <div id="toast"></div>
 <div id="tipPop" class="tippop" hidden></div>
-<script src="/static/app.js?v=24"></script>
+<script src="/static/app.js?v=25"></script>
 </body>
 </html>

@@ -270,6 +270,11 @@ table.tbl td.pts{font-weight:700}
 .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
 
 /* ---------- header user/provider ---------- */
+.acctsel{display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-left:4px}
+.acctsel button{font-family:'Saira Condensed',sans-serif; font-weight:700; font-size:12px;
+  border:0; background:transparent; color:var(--ink2); padding:4px 9px; cursor:pointer; border-left:1px solid var(--line)}
+.acctsel button:first-child{border-left:0}
+.acctsel button.on{background:var(--accent,#c8102e); color:#fff}
 .userbox{display:flex; align-items:center; gap:8px; margin-left:4px}
 .userbox .who{font-family:'Saira Condensed',sans-serif; font-size:13px; color:var(--ink2)}
 .provsel{font-family:'Saira Condensed',sans-serif; font-size:12px; color:var(--ink2);

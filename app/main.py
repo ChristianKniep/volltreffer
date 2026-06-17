@@ -228,40 +228,52 @@ def _rank_rows(rows):
     return rows
 
 
-def _leaderboard(conn, me_id):
+# account-view modes for leaderboard / matchday:
+#   "ghosts" -> only imported teamtip members (default; the real pool)
+#   "local"  -> only native app users
+#   "both"   -> everyone, but a name that exists as both is shown once (ghost kept)
+ACCOUNT_VIEWS = ("ghosts", "local", "both")
+
+
+def _leaderboard(conn, me_id, view="both"):
+    if view not in ACCOUNT_VIEWS:
+        view = "both"
     results = _finished_results(conn)
     user_tips = _user_match_tips(conn)
     ghost_names = _ghost_name_set(conn)
     rows = []
-    # real app users — skip any whose name duplicates a teamtip ghost (keep the
-    # ghost, which carries teamtip's authoritative points).
-    for uid, username in _approved_usernames(conn).items():
-        if (username or "").strip().lower() in ghost_names:
-            continue
-        agg = _score_tips(user_tips.get(uid, {}), results)
-        rows.append({"kind": "user", "user_id": uid, "username": username,
-                     "is_self": uid == me_id, **agg})
+    # real app users
+    if view in ("local", "both"):
+        for uid, username in _approved_usernames(conn).items():
+            # in 'both', drop a local row that duplicates a ghost (keep the ghost,
+            # which carries teamtip's authoritative points)
+            if view == "both" and (username or "").strip().lower() in ghost_names:
+                continue
+            agg = _score_tips(user_tips.get(uid, {}), results)
+            rows.append({"kind": "user", "user_id": uid, "username": username,
+                         "is_self": uid == me_id, **agg})
     # teamtip ghost members (read-only, imported from the betgame).
     # Prefer teamtip's OWN ranking numbers (source of truth) so our leaderboard
     # matches teamtip exactly; fall back to recomputing if they weren't synced.
-    member_tips = db.get_member_tips(conn)
-    for m in db.get_members(conn):
-        key = (m["betgame_id"], m["fk_user"])
-        agg = _score_tips(member_tips.get(key, {}), results)
-        if m.get("tt_points") is not None:
-            agg = {**agg,
-                   "points": m["tt_points"],
-                   "exact": m["tt_exact"] if m.get("tt_exact") is not None else agg["exact"],
-                   "goaldiff": m["tt_goaldiff"] if m.get("tt_goaldiff") is not None else agg["goaldiff"],
-                   "tendency": m["tt_tendency"] if m.get("tt_tendency") is not None else agg["tendency"],
-                   "tips": m["tt_betcount"] if m.get("tt_betcount") is not None else agg["tips"]}
-            source = "teamtip"
-        else:
-            source = "computed"
-        rows.append({"kind": "teamtip",
-                     "user_id": f"{m['betgame_id']}:{m['fk_user']}",
-                     "username": m["display_name"], "is_self": False,
-                     "points_source": source, **agg})
+    if view in ("ghosts", "both"):
+        member_tips = db.get_member_tips(conn)
+        for m in db.get_members(conn):
+            key = (m["betgame_id"], m["fk_user"])
+            agg = _score_tips(member_tips.get(key, {}), results)
+            if m.get("tt_points") is not None:
+                agg = {**agg,
+                       "points": m["tt_points"],
+                       "exact": m["tt_exact"] if m.get("tt_exact") is not None else agg["exact"],
+                       "goaldiff": m["tt_goaldiff"] if m.get("tt_goaldiff") is not None else agg["goaldiff"],
+                       "tendency": m["tt_tendency"] if m.get("tt_tendency") is not None else agg["tendency"],
+                       "tips": m["tt_betcount"] if m.get("tt_betcount") is not None else agg["tips"]}
+                source = "teamtip"
+            else:
+                source = "computed"
+            rows.append({"kind": "teamtip",
+                         "user_id": f"{m['betgame_id']}:{m['fk_user']}",
+                         "username": m["display_name"], "is_self": False,
+                         "points_source": source, **agg})
     return _rank_rows(rows)
 
 
@@ -787,15 +799,16 @@ def api_state(provider: str | None = None, user=Depends(auth.current_user)):
 
 # ---------- routes: leaderboard / pool ----------
 @app.get("/api/leaderboard")
-def api_leaderboard(user=Depends(auth.current_user)):
+def api_leaderboard(view: str = "ghosts", user=Depends(auth.current_user)):
     conn = db.connect()
     try:
-        rows = _leaderboard(conn, user["id"])
+        rows = _leaderboard(conn, user["id"], view=view)
         finished = conn.execute(
             "SELECT COUNT(*) c FROM matches WHERE status='finished'").fetchone()["c"]
     finally:
         conn.close()
-    return {"scheme": SC.scheme(), "scored_matches": finished, "standings": rows}
+    return {"scheme": SC.scheme(), "scored_matches": finished,
+            "view": view if view in ACCOUNT_VIEWS else "both", "standings": rows}
 
 
 @app.get("/api/match/{mid}/tips")
@@ -1013,14 +1026,17 @@ def api_matchdays(user=Depends(auth.current_user)):
 
 
 @app.get("/api/matchday/{key}")
-def api_matchday(key: str, user=Depends(auth.current_user)):
+def api_matchday(key: str, view: str = "ghosts", user=Depends(auth.current_user)):
     """teamtip-style 'rankings by matchday' grid. `key` is a round key: g1/g2/g3
     (each team's 1st/2nd/3rd group game) or a KO round (R32/R16/QF/SF/3RD/FINAL).
-    Returns every player (app users + teamtip ghosts) × every match in that round,
-    with each predicted scoreline and the points it earned.
+    `view` selects which accounts to show: ghosts | local | both (see ACCOUNT_VIEWS).
+    Returns the selected players × every match in that round, with each predicted
+    scoreline and the points it earned.
 
     Per-match reveal: a column's tips stay hidden until that match's kickoff has
     passed (same rule as /api/match/{id}/tips), so nobody can peek beforehand."""
+    if view not in ACCOUNT_VIEWS:
+        view = "both"
     conn = db.connect()
     try:
         keys = _matchday_keys(conn)
@@ -1080,17 +1096,19 @@ def api_matchday(key: str, user=Depends(auth.current_user)):
 
     ghost_names = {(mb["display_name"] or "").strip().lower() for mb in members}
     rows = []
-    for uid, uname in usernames.items():
-        if (uname or "").strip().lower() in ghost_names:
-            continue  # dedupe: keep the teamtip ghost, drop the app-user copy
-        rows.append(row_for(user_tips.get(uid, {}), uname, "user", uid == user["id"]))
-    for mb in members:
-        key = (mb["betgame_id"], mb["fk_user"])
-        rows.append(row_for(member_tips.get(key, {}), mb["display_name"], "teamtip", False))
+    if view in ("local", "both"):
+        for uid, uname in usernames.items():
+            if view == "both" and (uname or "").strip().lower() in ghost_names:
+                continue  # dedupe: keep the teamtip ghost, drop the app-user copy
+            rows.append(row_for(user_tips.get(uid, {}), uname, "user", uid == user["id"]))
+    if view in ("ghosts", "both"):
+        for mb in members:
+            mkey = (mb["betgame_id"], mb["fk_user"])
+            rows.append(row_for(member_tips.get(mkey, {}), mb["display_name"], "teamtip", False))
 
     # order players by points earned in this matchday (revealed games only)
     rows.sort(key=lambda r: (-r["matchday_points"], r["name"].lower()))
-    return {"key": key, "label": label, "matches": cols, "rows": rows,
+    return {"key": key, "label": label, "view": view, "matches": cols, "rows": rows,
             "scheme": SC.scheme()}
 
 
