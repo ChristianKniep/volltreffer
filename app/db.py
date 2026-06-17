@@ -219,8 +219,8 @@ def _import_legacy_teamtip(conn, user_id):
     if token:
         set_provider_creds(conn, user_id, "teamtip", {
             "token": token,
-            "fk_user": os.environ.get("TEAMTIP_USER", "454596"),
-            "fk_betgame": os.environ.get("TEAMTIP_BETGAME", "150936"),
+            "fk_user": os.environ.get("TEAMTIP_USER", "000000"),
+            "fk_betgame": os.environ.get("TEAMTIP_BETGAME", "000000"),
             "base": os.environ.get("TEAMTIP_BASE", ""),
         })
     conn.commit()

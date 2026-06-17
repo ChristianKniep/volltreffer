@@ -35,11 +35,11 @@ try:
 except ImportError:
     sys.exit("This tool needs 'requests':  pip install requests")
 
-# --- discovered defaults (override per round/user via CLI/env) ---
+# --- defaults (set your own per round/user via CLI/env: TEAMTIP_USER / TEAMTIP_BETGAME) ---
 BASE = os.environ.get("TEAMTIP_BASE", "https://teamtip.net")
 SCHEDULE_URL = os.environ.get("TEAMTIP_SCHEDULE", f"{BASE}/schedule/matches_139_16.json")
-FK_USER = int(os.environ.get("TEAMTIP_USER", "454596"))
-FK_BETGAME = int(os.environ.get("TEAMTIP_BETGAME", "150936"))
+FK_USER = int(os.environ.get("TEAMTIP_USER", "000000"))
+FK_BETGAME = int(os.environ.get("TEAMTIP_BETGAME", "000000"))
 
 # teamtip lists teams in German; map to our English names
 DE2EN = {

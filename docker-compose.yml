@@ -32,9 +32,11 @@ services:
       # The vars below are read ONCE on first start and imported onto the admin account
       # (legacy migration); afterwards manage the token in Settings and delete them here.
       # TEAMTIP_TOKEN: "Bearer eyJ..."
-      # TEAMTIP_USER: "454596"
-      # TEAMTIP_BETGAME: "150936"
-      AUTOMATION_TOKEN: "If0mVrn9dkc_GwSdpcfgliLj4MML68WLsq_3WM7qjIb-tMpY2Qafs-7Ebh2NvqRM"
+      # TEAMTIP_USER: "000000"
+      # TEAMTIP_BETGAME: "000000"
+      # AUTOMATION_TOKEN lets automation retune the shared model — set your own, keep it secret.
+      # Generate: python -c "import secrets;print(secrets.token_urlsafe(48))"
+      # AUTOMATION_TOKEN: "set-a-long-random-secret-here"
     volumes:
       - wc2026-data:/data          # SQLite database persists here
       - ./app:/srv/app             # live-mount source for dev (edit + reload, no rebuild)
