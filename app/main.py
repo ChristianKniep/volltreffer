@@ -966,26 +966,30 @@ def _progress_subjects(conn, view):
 
 
 def _progress_steps(conn, granularity):
-    """Ordered list of (step_key, step_label, [match_ids]) over FINISHED matches,
-    grouped by the chosen granularity. 'match' = one per game, 'day' = per kickoff
-    calendar date, 'round' = per group round / KO round. Chronological by kickoff."""
+    """Ordered list of (step_key, label, home, away, [match_ids], round_label) over
+    FINISHED matches, grouped by the chosen granularity. 'match' = one per game,
+    'day' = per kickoff calendar date, 'round' = per group/KO round. Chronological.
+    `home`/`away`/`round_label` are set only for match granularity (for the stacked
+    x-axis team codes and the round-grouping bands)."""
     rows = [dict(r) for r in conn.execute(
         "SELECT id,kickoff_et,home_team,away_team,home_ref,away_ref FROM matches "
         "WHERE status='finished' ORDER BY kickoff_et, match_no")]
     if not rows:
         return []
     if granularity == "match":
+        keys = _matchday_keys(conn)
         steps = []
         for m in rows:
             h = m["home_team"] or m["home_ref"]
             a = m["away_team"] or m["away_ref"]
-            steps.append((m["id"], f"{h}–{a}", [m["id"]]))
+            _rk, rlabel, _ro = keys[m["id"]]
+            steps.append((m["id"], f"{h}–{a}", h, a, [m["id"]], rlabel))
         return steps
     if granularity == "day":
         buckets = {}
         for m in rows:
             buckets.setdefault(m["kickoff_et"][:10], []).append(m["id"])
-        return [(d, d, ids) for d, ids in sorted(buckets.items())]
+        return [(d, d, None, None, ids, None) for d, ids in sorted(buckets.items())]
     # round
     keys = _matchday_keys(conn)
     order = {}
@@ -994,7 +998,8 @@ def _progress_steps(conn, granularity):
         k, label, o = keys[m["id"]]
         order[k] = (o, label)
         buckets.setdefault(k, []).append(m["id"])
-    return [(k, order[k][1], buckets[k]) for k in sorted(buckets, key=lambda k: order[k][0])]
+    return [(k, order[k][1], None, None, buckets[k], None)
+            for k in sorted(buckets, key=lambda k: order[k][0])]
 
 
 @app.get("/api/progress")
@@ -1024,7 +1029,7 @@ def api_progress(view: str = "ghosts", granularity: str = "round",
               for sid, s in subjects.items()}
     step_meta = []
 
-    for skey, slabel, mids in steps:
+    for skey, slabel, shome, saway, mids, sround in steps:
         # per-step gains for each subject
         for sid, s in subjects.items():
             g = {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0}
@@ -1055,7 +1060,8 @@ def api_progress(view: str = "ghosts", granularity: str = "round",
             if keyv != prev:
                 rank = i; prev = keyv
             series[sid]["rank"].append(rank)
-        step_meta.append({"key": skey, "label": slabel, "matches": len(mids)})
+        step_meta.append({"key": skey, "label": slabel, "matches": len(mids),
+                          "home": shome, "away": saway, "round": sround})
 
     return {"granularity": granularity, "view": view,
             "steps": step_meta, "series": list(series.values()),

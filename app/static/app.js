@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v26";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v27";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -656,17 +656,14 @@ async function loadLeaderboard(){
       <tbody>${rows}</tbody></table>`;
 }
 
-/* ---------- progress charts (uPlot) ---------- */
+/* ---------- progress chart: cumulative points over time (uPlot) ---------- */
 let PROG_DATA = null;        // {granularity, view, steps, series, scheme}
-let PROG_METRIC = "rank";    // "rank" | "points" | "gains"
 let PROG_GRAN = localStorage.getItem("wc_prog_gran") || "round";
 let PROG_HIDDEN = new Set();
-let PROG_FOCUS = null;        // subject_id for the gains-bar mode
 let uplot = null;            // current uPlot instance
 const PROG_COLORS = ["#C8102E","#0E7C7B","#1F6FB2","#E0561F","#6A359C","#2E8B57",
   "#A61E4D","#5E7A1E","#2C3E8C","#8B4A2B","#CC6B1F","#A9821B","#3D5A6C","#B3122B",
   "#7A1FA2","#1F9E4A","#B06A1E","#4A6FA5","#9E2B5E","#3E7A3E"];
-const GAIN_COLORS = {exact:"#1e9e4a", goaldiff:"#7aa01e", tendency:"#d4a017"};
 
 /* ---------- by-matchday predictions grid (grouped by round) ---------- */
 let MD_LIST = null;        // [{key,label,index,matches,finished}]
@@ -757,26 +754,12 @@ async function loadProgress(){
   document.getElementById("progGran").querySelectorAll("button").forEach(b=>
     b.setAttribute("aria-selected", b.dataset.gran===PROG_GRAN));
   if(empty){ document.getElementById("progLegend").innerHTML=""; if(uplot){uplot.destroy(); uplot=null;} return; }
-  // focus selector only used in gains mode
-  const fw = document.getElementById("progFocusWrap");
-  fw.hidden = PROG_METRIC!=="gains";
-  if(PROG_METRIC==="gains"){
-    if(!PROG_FOCUS || !PROG_DATA.series.some(s=>s.subject_id===PROG_FOCUS))
-      PROG_FOCUS = PROG_DATA.series[0].subject_id;
-    document.getElementById("progFocus").innerHTML = PROG_DATA.series
-      .map(s=>`<option value="${attrEsc(s.subject_id)}" ${s.subject_id===PROG_FOCUS?"selected":""}>${fmtEl(s.name)}</option>`).join("");
-  }
   renderProgLegend();
   drawProgress();
 }
 
 function renderProgLegend(){
   const leg = document.getElementById("progLegend");
-  if(PROG_METRIC==="gains"){
-    leg.innerHTML = `<span class="leghead">Gains:</span>`+
-      ["exact","goaldiff","tendency"].map(k=>`<span class="legitem static"><span class="swatch" style="background:${GAIN_COLORS[k]}"></span>${k} (${PROG_DATA.scheme[k]})</span>`).join("");
-    return;
-  }
   leg.innerHTML = PROG_DATA.series.map((s,i)=>{
     const off = PROG_HIDDEN.has(s.subject_id) ? " off" : "";
     return `<button class="legitem${off}" data-sid="${attrEsc(s.subject_id)}">
@@ -806,13 +789,12 @@ function drawProgress(){
   const labels = PROG_DATA.steps.map(s=>s.label);
   const sz = chartSize();
 
-  if(PROG_METRIC==="gains"){ drawGains(el, xs, labels, sz); return; }
-
-  const isRank = PROG_METRIC==="rank";
+  // per-match steps get a stacked 3-letter label (GER / vs / ENG); others a short text
+  const perMatch = PROG_DATA.granularity === "match";
   const data = [xs];
   const series = [{}];
   PROG_DATA.series.forEach((s,i)=>{
-    data.push(s[PROG_METRIC].map(v=>v));
+    data.push(s.points.map(v=>v));
     series.push({
       label: s.name, stroke: progSeriesColor(s,i),
       width: s.kind==="user"?3:1.6,
@@ -820,62 +802,84 @@ function drawProgress(){
       show: !PROG_HIDDEN.has(s.subject_id),
     });
   });
+  const steps = PROG_DATA.steps;
   const opts = {
     ...sz,
-    scales:{ x:{time:false}, y: isRank ? {dir:-1, range:(u,min,max)=>[Math.max(1,max), 1]} : {} },
+    scales:{ x:{time:false}, y:{} },
     axes:[
-      { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} },
-      { label: isRank?"rank":"points" },
+      perMatch
+        // hide default x text — we draw stacked team codes in the draw hook
+        ? { size:46, grid:{show:false}, values:()=>[], ticks:{show:true} }
+        : { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} },
+      { label: "cumulative points" },
     ],
     legend:{show:false},
     cursor:{ focus:{prox:24}, points:{size:7} },
-    hooks:{ setCursor:[u=>showProgTip(u, labels)] },
+    hooks:{
+      setCursor:[u=>showProgTip(u, labels)],
+      // round bands draw first (behind series via drawClear), labels after
+      drawClear: perMatch ? [u=>drawRoundBands(u, steps)] : [],
+      draw: perMatch ? [u=>drawStackedXLabels(u, steps)] : [],
+    },
     series,
   };
   uplot = new uPlot(opts, data, el);
   el.onmouseleave = ()=>{ document.getElementById("progTip").hidden=true; };
 }
 
-// stacked-bar "gains per step" for the focused player
-function drawGains(el, xs, labels, sz){
-  const s = PROG_DATA.series.find(x=>x.subject_id===PROG_FOCUS) || PROG_DATA.series[0];
-  const ex = s.gains.map(g=>g.exact*PROG_DATA.scheme.exact);
-  const gd = s.gains.map(g=>g.goaldiff*PROG_DATA.scheme.goaldiff);
-  const te = s.gains.map(g=>g.tendency*PROG_DATA.scheme.tendency);
-  const data = [xs, ex, gd, te];
-  const stacked = (i)=> (u,sidx,didx)=> null; // drawn manually below
-  const opts = {
-    ...sz,
-    scales:{ x:{time:false}, y:{} },
-    axes:[
-      { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} },
-      { label:`points gained — ${s.name}` },
-    ],
-    legend:{show:false},
-    cursor:{ focus:{prox:1e6}, points:{show:false} },
-    hooks:{ setCursor:[u=>showGainsTip(u, labels, s)],
-            draw:[u=>drawStackedBars(u, ex, gd, te)] },
-    series:[{}, {label:"exact"}, {label:"goaldiff"}, {label:"tendency"}],
-  };
-  uplot = new uPlot(opts, data, el);
-  el.onmouseleave = ()=>{ document.getElementById("progTip").hidden=true; };
+// shade alternating round groups behind the chart + label each round (per-match)
+function drawRoundBands(u, steps){
+  if(!steps.length) return;
+  const ctx = u.ctx;
+  // contiguous runs of the same round label
+  const runs = [];
+  let start = 0;
+  for(let i=1;i<=steps.length;i++){
+    if(i===steps.length || steps[i].round!==steps[start].round){
+      runs.push({round: steps[start].round, a:start, b:i-1}); start=i;
+    }
+  }
+  ctx.save();
+  const top = u.bbox.top, bot = u.bbox.top + u.bbox.height;
+  const half = (i)=> (u.valToPos(i,"x",true)); // center of column i
+  runs.forEach((r,ri)=>{
+    // band spans from midpoint before first to midpoint after last column
+    const lx = r.a===0 ? u.bbox.left : (half(r.a-1)+half(r.a))/2;
+    const rx = r.b===steps.length-1 ? u.bbox.left+u.bbox.width : (half(r.b)+half(r.b+1))/2;
+    if(ri%2===1){ ctx.fillStyle = "rgba(0,0,0,0.035)"; ctx.fillRect(lx, top, rx-lx, bot-top); }
+    // round divider
+    if(r.a>0){ ctx.strokeStyle="rgba(0,0,0,0.10)"; ctx.beginPath(); ctx.moveTo(lx,top); ctx.lineTo(lx,bot); ctx.stroke(); }
+    // round label centered above the band
+    if(r.round){
+      ctx.font="700 10px 'Saira Condensed',system-ui,sans-serif";
+      ctx.fillStyle="#8a8170"; ctx.textAlign="center"; ctx.textBaseline="top";
+      ctx.fillText(roundShort(r.round), (lx+rx)/2, top+2);
+    }
+  });
+  ctx.restore();
+}
+function roundShort(r){
+  r = r||"";
+  const m = r.match(/Group · Round (\d)/); if(m) return "Group "+m[1];
+  return r.replace("Round of 32","R32").replace("Round of 16","R16")
+    .replace("Quarter-finals","QF").replace("Semi-finals","SF").replace("Third place","3rd");
 }
 
-function drawStackedBars(u, ex, gd, te){
+// draw "GER / vs / ENG" stacked under each x tick (per-match granularity)
+function drawStackedXLabels(u, steps){
   const ctx = u.ctx;
-  const n = u.data[0].length;
-  const bw = Math.max(4, (u.bbox.width/n)*0.6);
-  for(let i=0;i<n;i++){
-    const xc = u.valToPos(i, "x", true);
-    let base = u.valToPos(0, "y", true);
-    [[ex[i],GAIN_COLORS.exact],[gd[i],GAIN_COLORS.goaldiff],[te[i],GAIN_COLORS.tendency]].forEach(([val,col])=>{
-      if(!val) return;
-      const top = u.valToPos((u.posToVal(base,"y")+val), "y", true);
-      ctx.fillStyle = col;
-      ctx.fillRect(xc-bw/2, top, bw, base-top);
-      base = top;
-    });
+  ctx.save();
+  ctx.font = "700 9px 'Saira Condensed',system-ui,sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const yTop = u.bbox.top + u.bbox.height + 6;
+  for(let i=0;i<steps.length;i++){
+    const x = u.valToPos(i, "x", true);
+    const h = teamAbbr(steps[i].home||""), a = teamAbbr(steps[i].away||"");
+    ctx.fillStyle = "#3a352c"; ctx.fillText(h, x, yTop);
+    ctx.fillStyle = "#a79e8c"; ctx.fillText("v", x, yTop+10);
+    ctx.fillStyle = "#3a352c"; ctx.fillText(a, x, yTop+19);
   }
+  ctx.restore();
 }
 
 function shortLabel(l){ return l.length>14 ? l.slice(0,13)+"…" : l; }
@@ -885,7 +889,6 @@ function showProgTip(u, labels){
   const tip = document.getElementById("progTip");
   const idx = u.cursor.idx;
   if(idx==null){ tip.hidden=true; return; }
-  const isRank = PROG_METRIC==="rank";
   const rows = PROG_DATA.series.map((s,i)=>({
     name:s.name, kind:s.kind, color:progSeriesColor(s,i),
     pts:s.points[idx], rank:s.rank[idx], gain:s.gains[idx],
@@ -899,18 +902,6 @@ function showProgTip(u, labels){
   </div>`).join("");
   tip.innerHTML = `<div class="pthead">${fmtEl(labels[idx])}</div>
     <div class="ptcols"><span></span><span></span><span>player</span><span>pts</span><span>Δ</span></div>${body}`;
-  placeProgTip(u, tip);
-}
-function showGainsTip(u, labels, s){
-  const tip = document.getElementById("progTip");
-  const idx = u.cursor.idx;
-  if(idx==null){ tip.hidden=true; return; }
-  const g = s.gains[idx];
-  tip.innerHTML = `<div class="pthead">${fmtEl(labels[idx])} · ${fmtEl(s.name)}</div>
-    <div class="ptrow"><span class="ptsw" style="background:${GAIN_COLORS.exact}"></span><span class="ptnm">exact</span><span class="ptpt">${g.exact}×${PROG_DATA.scheme.exact}</span></div>
-    <div class="ptrow"><span class="ptsw" style="background:${GAIN_COLORS.goaldiff}"></span><span class="ptnm">goal diff</span><span class="ptpt">${g.goaldiff}×${PROG_DATA.scheme.goaldiff}</span></div>
-    <div class="ptrow"><span class="ptsw" style="background:${GAIN_COLORS.tendency}"></span><span class="ptnm">tendency</span><span class="ptpt">${g.tendency}×${PROG_DATA.scheme.tendency}</span></div>
-    <div class="ptrow tot"><span class="ptnm">step total</span><span class="ptpt">+${g.points}</span></div>`;
   placeProgTip(u, tip);
 }
 function placeProgTip(u, tip){
@@ -997,14 +988,6 @@ document.querySelectorAll("#schedSub button").forEach(b=>{
     document.getElementById("schedPast").classList.toggle("active", b.dataset.sub==="past");
   };
 });
-document.querySelectorAll("#progSub button").forEach(b=>{
-  b.onclick = ()=>{
-    document.querySelectorAll("#progSub button").forEach(x=>x.setAttribute("aria-selected", x===b));
-    PROG_METRIC = b.dataset.prog;
-    // gains mode needs the focus selector populated -> go through loadProgress
-    if(PROG_METRIC==="gains") loadProgress(); else { document.getElementById("progFocusWrap").hidden=true; renderProgLegend(); drawProgress(); }
-  };
-});
 document.querySelectorAll("#progGran button").forEach(b=>{
   b.onclick = ()=>{
     PROG_GRAN = b.dataset.gran;
@@ -1012,7 +995,6 @@ document.querySelectorAll("#progGran button").forEach(b=>{
     loadProgress();
   };
 });
-document.getElementById("progFocus").onchange = (e)=>{ PROG_FOCUS = e.target.value; drawProgress(); };
 document.getElementById("updateBtn").onclick = runUpdate;
 document.getElementById("appVer").textContent = APP_VERSION;
 

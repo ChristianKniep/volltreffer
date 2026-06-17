@@ -365,15 +365,13 @@ table.tbl td.pts{font-weight:700}
 
 /* ---------- progress charts ---------- */
 .progbars{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:12px}
-.progfocus{font-family:'Saira Condensed',sans-serif; font-size:12px; color:var(--ink2); display:inline-flex; gap:6px; align-items:center}
-.progfocus select{font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:6px}
+
 .chartwrap{position:relative; background:var(--tile); border:1px solid var(--line); border-radius:12px; padding:10px}
 #progChart{max-width:100%; display:block}
 .charlegend{display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; align-items:center}
 .charlegend .leghead{font-size:12px; color:var(--ink2); font-weight:700}
 .legitem{display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;
   background:var(--tile); border:1px solid var(--line); border-radius:999px; padding:3px 10px; color:var(--ink)}
-.legitem.static{cursor:default}
 .legitem .swatch{width:11px; height:11px; border-radius:50%; flex:none}
 .legitem.off{opacity:.4; text-decoration:line-through}
 /* column-hover tooltip (everyone's standing at a step) */
