@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v23";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v24";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -440,37 +440,47 @@ function provCard(p){
     </div>
   </div>`;
 }
+async function syncTeamtipGroup(btn){
+  const card = btn ? btn.closest(".provcard") : null;
+  const msg = card ? card.querySelector(".pmsg") : null;
+  if(btn) btn.disabled = true;
+  if(msg){ msg.textContent = "Importing group…"; msg.className = "pmsg"; }
+  toast("Syncing teamtip group…");
+  try{
+    const r = await fetch("/api/teamtip/sync-group",{method:"POST"});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ const m=d.detail||"Group sync failed."; if(msg){msg.textContent=m;msg.className="pmsg err";} toast(m); return; }
+    if(d.errors && d.errors.length){ if(msg){msg.textContent=d.errors.join(" ");msg.className="pmsg warn";} toast(d.errors[0]); }
+    else { const m=`Imported ${d.members} players, ${d.tips} tips.`; if(msg){msg.textContent=m;msg.className="pmsg ok";} toast("teamtip group synced — "+m); }
+    await Promise.all([loadLeaderboard(), getState()]);
+    if(MD_LIST) await loadMatchdays();
+  }catch(e){ toast("Group sync error: "+e.message); }
+  finally{ if(btn) btn.disabled = false; }
+}
+
 function bindProvCards(){
   document.querySelectorAll(".provcard").forEach(card=>{
     const pid = card.dataset.pid;
     const msg = card.querySelector(".pmsg");
-    card.querySelector(".p-save").onclick = async ()=>{
+    const save = card.querySelector(".p-save");
+    if(save) save.onclick = async ()=>{
       const body = {};
       card.querySelectorAll("input[data-field]").forEach(i=>{ if(i.value!=="") body[i.dataset.field]=i.value; });
-      msg.textContent = "Saving…"; msg.className = "pmsg";
+      if(msg){ msg.textContent = "Saving…"; msg.className = "pmsg"; }
       const r = await fetch(`/api/providers/${pid}/credentials`,{method:"PUT",
         headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       const d = await r.json().catch(()=>({}));
-      if(!r.ok){ msg.textContent = d.detail||"Save failed."; msg.className="pmsg err"; return; }
-      msg.textContent = d.valid ? (d.message||"Connected.") : ("Saved, but: "+(d.message||"could not verify"));
-      msg.className = "pmsg "+(d.valid?"ok":"warn");
+      if(!r.ok){ if(msg){msg.textContent = d.detail||"Save failed."; msg.className="pmsg err";} toast(d.detail||"Save failed."); return; }
+      if(msg){ msg.textContent = d.valid ? (d.message||"Connected.") : ("Saved, but: "+(d.message||"could not verify")); msg.className = "pmsg "+(d.valid?"ok":"warn"); }
+      // a successful teamtip connect auto-imports the group (server side)
+      if(d.group && d.group.members!=null) toast(`Connected · imported ${d.group.members} teamtip players.`);
+      else toast(d.valid?"Connected.":"Saved.");
       await loadSettings(); await getState();
+      if(MD_LIST) await loadMatchdays();
     };
-    const grp = card.querySelector(".p-group");
-    if(grp) grp.onclick = async ()=>{
-      grp.disabled = true;
-      msg.textContent = "Importing group…"; msg.className = "pmsg";
-      try{
-        const r = await fetch("/api/teamtip/sync-group",{method:"POST"});
-        const d = await r.json().catch(()=>({}));
-        if(!r.ok){ msg.textContent = d.detail||"Group sync failed."; msg.className="pmsg err"; toast(d.detail||"Group sync failed."); return; }
-        if(d.errors && d.errors.length){ msg.textContent = d.errors.join(" "); msg.className="pmsg warn"; toast(d.errors[0]); }
-        else { msg.textContent = `Imported ${d.members} players, ${d.tips} tips.`; msg.className="pmsg ok"; toast(`teamtip group synced: ${d.members} players, ${d.tips} tips.`); }
-        // refresh every view that shows players
-        await Promise.all([loadLeaderboard(), getState()]);
-        if(MD_LIST) await loadMatchdays();
-      } finally { grp.disabled = false; }
-    };
+    // NOTE: the "Sync group" button is handled by a delegated listener
+    // (see syncTeamtipGroup + the document click handler) so it works even if
+    // this per-card binding is ever skipped or the card re-renders.
     const del = card.querySelector(".p-del");
     if(del) del.onclick = async ()=>{
       await fetch(`/api/providers/${pid}/credentials`,{method:"DELETE"});
@@ -918,6 +928,11 @@ document.getElementById("provSel").onchange = (e)=>{
   localStorage.setItem("wc_provider", ACTIVE_PROVIDER);
   getState();
 };
+// delegated: the Sync-group button works even if per-card binding was skipped
+document.body.addEventListener("click", (e)=>{
+  const g = e.target.closest(".p-group");
+  if(g){ e.preventDefault(); syncTeamtipGroup(g); }
+});
 ensureHoverDelegation();
 setAuthMode("login");
 checkAuth();
