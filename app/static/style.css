@@ -428,6 +428,7 @@ table.tbl td.pts{font-weight:700}
 .mdrk{display:inline-block; min-width:18px; color:var(--muted); font-variant-numeric:tabular-nums}
 .ghosttag{display:inline-block; margin-left:5px; padding:0 4px; font-size:9px; font-weight:700; color:#fff; background:#0e7c7b; border-radius:3px; vertical-align:middle}
 .mdtbl th.mdmatch{font-size:10px; line-height:1.15}
+.mdtbl th.mdmatch .mg{display:block; font-size:9px; font-weight:700; color:var(--muted); letter-spacing:.04em}
 .mdtbl th.mdmatch .mh,.mdtbl th.mdmatch .mv{display:block}
 .mdtbl th.mdmatch .mv{color:var(--muted)}
 .mdtbl th.mdmatch.locked{opacity:.6}

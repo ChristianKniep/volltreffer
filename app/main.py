@@ -930,51 +930,86 @@ def api_progress(user=Depends(auth.current_user)):
     return {"matchdays": matchdays, "series": list(series.values())}
 
 
-def _matchday_date(kickoff_et):
-    """A 'matchday' is the calendar day of kickoff (US-Eastern wall clock), the
-    same grouping the Schedule tab uses. Returns 'YYYY-MM-DD'."""
-    return kickoff_et[:10]
+# Knockout rounds in tournament order, with display labels.
+_KO_ORDER = ["R32", "R16", "QF", "SF", "3RD", "FINAL"]
+_KO_LABEL = {"R32": "Round of 32", "R16": "Round of 16", "QF": "Quarter-finals",
+             "SF": "Semi-finals", "3RD": "Third place", "FINAL": "Final"}
+
+
+def _matchday_keys(conn):
+    """Map each match id -> (key, label, sort_order). A 'matchday' is now a round:
+    group stage split into each team's 1st/2nd/3rd game (g1/g2/g3), then each KO
+    round. Group round is derived from per-team kickoff order and is consistent
+    for both teams in every fixture (verified against the schedule)."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT id,stage,grp,round,home_ref,away_ref,kickoff_et FROM matches")]
+    # per-team appearance index within the group stage
+    appear = {}
+    seen = {}
+    for m in sorted((x for x in rows if x["stage"] == "group"),
+                    key=lambda x: x["kickoff_et"]):
+        n = max(seen.get(m["home_ref"], 0), seen.get(m["away_ref"], 0)) + 1
+        seen[m["home_ref"]] = n
+        seen[m["away_ref"]] = n
+        appear[m["id"]] = n
+    out = {}
+    for m in rows:
+        if m["stage"] == "group":
+            n = appear.get(m["id"], 1)
+            out[m["id"]] = (f"g{n}", f"Group · Round {n}", n)
+        else:
+            rnd = m["round"]
+            order = 10 + (_KO_ORDER.index(rnd) if rnd in _KO_ORDER else 99)
+            out[m["id"]] = (rnd, _KO_LABEL.get(rnd, rnd), order)
+    return out
 
 
 @app.get("/api/matchdays")
 def api_matchdays(user=Depends(auth.current_user)):
-    """List of matchdays (kickoff calendar dates) with match counts, for the
-    By-matchday view's selector."""
+    """List of matchdays (group rounds 1/2/3 + knockout rounds) with match counts,
+    for the By-matchday view's selector."""
     conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT kickoff_et, status FROM matches ORDER BY kickoff_et").fetchall()
+        keys = _matchday_keys(conn)
+        rows = conn.execute("SELECT id, status FROM matches").fetchall()
     finally:
         conn.close()
-    days = {}
+    mds = {}
     for r in rows:
-        d = days.setdefault(_matchday_date(r["kickoff_et"]),
-                            {"date": _matchday_date(r["kickoff_et"]), "matches": 0, "finished": 0})
+        key, label, order = keys[r["id"]]
+        d = mds.setdefault(key, {"key": key, "label": label, "_order": order,
+                                 "matches": 0, "finished": 0})
         d["matches"] += 1
         if r["status"] == "finished":
             d["finished"] += 1
-    ordered = [days[k] for k in sorted(days)]
+    ordered = sorted(mds.values(), key=lambda d: d["_order"])
     for i, d in enumerate(ordered, 1):
         d["index"] = i
+        d.pop("_order", None)
     return {"matchdays": ordered}
 
 
-@app.get("/api/matchday/{date}")
-def api_matchday(date: str, user=Depends(auth.current_user)):
-    """teamtip-style 'rankings by matchday' grid: for the given matchday (kickoff
-    calendar date 'YYYY-MM-DD'), every player (app users + teamtip ghosts) × every
-    match in that day, with each predicted scoreline and the points it earned.
+@app.get("/api/matchday/{key}")
+def api_matchday(key: str, user=Depends(auth.current_user)):
+    """teamtip-style 'rankings by matchday' grid. `key` is a round key: g1/g2/g3
+    (each team's 1st/2nd/3rd group game) or a KO round (R32/R16/QF/SF/3RD/FINAL).
+    Returns every player (app users + teamtip ghosts) × every match in that round,
+    with each predicted scoreline and the points it earned.
 
     Per-match reveal: a column's tips stay hidden until that match's kickoff has
     passed (same rule as /api/match/{id}/tips), so nobody can peek beforehand."""
     conn = db.connect()
     try:
+        keys = _matchday_keys(conn)
+        mids = [mid for mid, (k, _l, _o) in keys.items() if k == key]
+        if not mids:
+            raise HTTPException(404, f"unknown matchday {key}")
+        qmarks = ",".join("?" * len(mids))
         matches = [dict(m) for m in conn.execute(
             "SELECT id,grp,round,match_no,home_team,away_team,home_ref,away_ref,"
-            "kickoff_et,status,home_score,away_score FROM matches "
-            "WHERE substr(kickoff_et,1,10)=? ORDER BY kickoff_et, match_no", (date,))]
-        if not matches:
-            raise HTTPException(404, f"no matches on {date}")
+            f"kickoff_et,status,home_score,away_score FROM matches "
+            f"WHERE id IN ({qmarks}) ORDER BY kickoff_et, match_no", mids)]
+        label = keys[mids[0]][1]
         results = _finished_results(conn)
         user_tips = _user_match_tips(conn)
         usernames = _approved_usernames(conn)
@@ -1029,7 +1064,8 @@ def api_matchday(date: str, user=Depends(auth.current_user)):
 
     # order players by points earned in this matchday (revealed games only)
     rows.sort(key=lambda r: (-r["matchday_points"], r["name"].lower()))
-    return {"date": date, "matches": cols, "rows": rows, "scheme": SC.scheme()}
+    return {"key": key, "label": label, "matches": cols, "rows": rows,
+            "scheme": SC.scheme()}
 
 
 @app.post("/api/reset")
