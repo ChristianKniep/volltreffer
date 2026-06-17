@@ -230,14 +230,27 @@ def _leaderboard(conn, me_id):
         agg = _score_tips(user_tips.get(uid, {}), results)
         rows.append({"kind": "user", "user_id": uid, "username": username,
                      "is_self": uid == me_id, **agg})
-    # teamtip ghost members (read-only, imported from the betgame)
+    # teamtip ghost members (read-only, imported from the betgame).
+    # Prefer teamtip's OWN ranking numbers (source of truth) so our leaderboard
+    # matches teamtip exactly; fall back to recomputing if they weren't synced.
     member_tips = db.get_member_tips(conn)
     for m in db.get_members(conn):
         key = (m["betgame_id"], m["fk_user"])
         agg = _score_tips(member_tips.get(key, {}), results)
+        if m.get("tt_points") is not None:
+            agg = {**agg,
+                   "points": m["tt_points"],
+                   "exact": m["tt_exact"] if m.get("tt_exact") is not None else agg["exact"],
+                   "goaldiff": m["tt_goaldiff"] if m.get("tt_goaldiff") is not None else agg["goaldiff"],
+                   "tendency": m["tt_tendency"] if m.get("tt_tendency") is not None else agg["tendency"],
+                   "tips": m["tt_betcount"] if m.get("tt_betcount") is not None else agg["tips"]}
+            source = "teamtip"
+        else:
+            source = "computed"
         rows.append({"kind": "teamtip",
                      "user_id": f"{m['betgame_id']}:{m['fk_user']}",
-                     "username": m["display_name"], "is_self": False, **agg})
+                     "username": m["display_name"], "is_self": False,
+                     "points_source": source, **agg})
     return _rank_rows(rows)
 
 
@@ -915,6 +928,108 @@ def api_progress(user=Depends(auth.current_user)):
         e["points"][s["matchday"]] = s["points"]
         e["rank"][s["matchday"]] = s["rank"]
     return {"matchdays": matchdays, "series": list(series.values())}
+
+
+def _matchday_date(kickoff_et):
+    """A 'matchday' is the calendar day of kickoff (US-Eastern wall clock), the
+    same grouping the Schedule tab uses. Returns 'YYYY-MM-DD'."""
+    return kickoff_et[:10]
+
+
+@app.get("/api/matchdays")
+def api_matchdays(user=Depends(auth.current_user)):
+    """List of matchdays (kickoff calendar dates) with match counts, for the
+    By-matchday view's selector."""
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            "SELECT kickoff_et, status FROM matches ORDER BY kickoff_et").fetchall()
+    finally:
+        conn.close()
+    days = {}
+    for r in rows:
+        d = days.setdefault(_matchday_date(r["kickoff_et"]),
+                            {"date": _matchday_date(r["kickoff_et"]), "matches": 0, "finished": 0})
+        d["matches"] += 1
+        if r["status"] == "finished":
+            d["finished"] += 1
+    ordered = [days[k] for k in sorted(days)]
+    for i, d in enumerate(ordered, 1):
+        d["index"] = i
+    return {"matchdays": ordered}
+
+
+@app.get("/api/matchday/{date}")
+def api_matchday(date: str, user=Depends(auth.current_user)):
+    """teamtip-style 'rankings by matchday' grid: for the given matchday (kickoff
+    calendar date 'YYYY-MM-DD'), every player (app users + teamtip ghosts) × every
+    match in that day, with each predicted scoreline and the points it earned.
+
+    Per-match reveal: a column's tips stay hidden until that match's kickoff has
+    passed (same rule as /api/match/{id}/tips), so nobody can peek beforehand."""
+    conn = db.connect()
+    try:
+        matches = [dict(m) for m in conn.execute(
+            "SELECT id,grp,round,match_no,home_team,away_team,home_ref,away_ref,"
+            "kickoff_et,status,home_score,away_score FROM matches "
+            "WHERE substr(kickoff_et,1,10)=? ORDER BY kickoff_et, match_no", (date,))]
+        if not matches:
+            raise HTTPException(404, f"no matches on {date}")
+        results = _finished_results(conn)
+        user_tips = _user_match_tips(conn)
+        usernames = _approved_usernames(conn)
+        member_tips = db.get_member_tips(conn)
+        members = db.get_members(conn)
+    finally:
+        conn.close()
+
+    now = datetime.datetime.utcnow()
+    # which matches are revealed (kickoff passed or finished)
+    cols = []
+    for m in matches:
+        revealed = m["status"] == "finished" or now >= _kickoff_utc(m["kickoff_et"])
+        cols.append({
+            "id": m["id"], "group": m["grp"], "round": m["round"],
+            "home": m["home_team"] or m["home_ref"],
+            "away": m["away_team"] or m["away_ref"],
+            "kickoff_et": m["kickoff_et"], "status": m["status"],
+            "result": (f"{m['home_score']}-{m['away_score']}"
+                       if m["status"] == "finished" else None),
+            "revealed": revealed,
+        })
+    revealed_ids = {c["id"] for c in cols if c["revealed"]}
+
+    def row_for(subject_tips, name, kind, is_self):
+        cells, total = {}, 0
+        for c in cols:
+            mid = c["id"]
+            if mid not in revealed_ids:
+                cells[mid] = None                      # hidden until kickoff
+                continue
+            t = subject_tips.get(mid)
+            if not t:
+                cells[mid] = {"tip": None}
+                continue
+            cell = {"tip": f"{t[0]}-{t[1]}"}
+            if mid in results:
+                cls = SC.classify(t[0], t[1], *results[mid])
+                cell["points"] = SC.POINTS[cls]
+                cell["outcome"] = cls
+                total += SC.POINTS[cls]
+            cells[mid] = cell
+        return {"name": name, "kind": kind, "is_self": is_self,
+                "cells": cells, "matchday_points": total}
+
+    rows = []
+    for uid, uname in usernames.items():
+        rows.append(row_for(user_tips.get(uid, {}), uname, "user", uid == user["id"]))
+    for mb in members:
+        key = (mb["betgame_id"], mb["fk_user"])
+        rows.append(row_for(member_tips.get(key, {}), mb["display_name"], "teamtip", False))
+
+    # order players by points earned in this matchday (revealed games only)
+    rows.sort(key=lambda r: (-r["matchday_points"], r["name"].lower()))
+    return {"date": date, "matches": cols, "rows": rows, "scheme": SC.scheme()}
 
 
 @app.post("/api/reset")

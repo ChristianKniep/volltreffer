@@ -291,7 +291,15 @@ class TeamtipProvider(BetProvider):
         for m in ranking:
             db.upsert_member(conn, bg, m["fk_user"],
                              (m.get("user_name") or f"user {m['fk_user']}").strip(),
-                             owner_user_id)
+                             owner_user_id,
+                             ranking={
+                                 "points": m.get("points_total"),
+                                 "exact": m.get("exact"),
+                                 "goaldiff": m.get("goaldiff"),
+                                 "tendency": m.get("tendency"),
+                                 "betcount": m.get("betcount"),
+                                 "position": m.get("position"),
+                             })
             out["members"] += 1
 
         tt = _tt_schedule_index(schedule)

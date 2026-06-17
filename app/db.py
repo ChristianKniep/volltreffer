@@ -85,6 +85,13 @@ CREATE TABLE IF NOT EXISTS teamtip_members (
   fk_user       INTEGER NOT NULL,
   display_name  TEXT NOT NULL,
   owner_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  -- teamtip's own authoritative ranking numbers (source of truth for ghosts)
+  tt_points     INTEGER,              -- points_total from /bg_v_ranking_16
+  tt_exact      INTEGER,
+  tt_goaldiff   INTEGER,
+  tt_tendency   INTEGER,
+  tt_betcount   INTEGER,
+  tt_position   INTEGER,
   first_seen    TEXT,
   last_seen     TEXT,
   PRIMARY KEY (betgame_id, fk_user)
@@ -164,6 +171,19 @@ def _migrate_users(conn):
         conn.execute("ALTER TABLE users ADD COLUMN timezone TEXT")
     if "slot_ratings" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN slot_ratings TEXT")
+    conn.commit()
+
+
+def _migrate_members(conn):
+    """Add teamtip's authoritative ranking columns to a pre-existing
+    teamtip_members table (created before native points were stored)."""
+    if not _table_exists(conn, "teamtip_members"):
+        return
+    cols = _columns(conn, "teamtip_members")
+    for col in ("tt_points", "tt_exact", "tt_goaldiff", "tt_tendency",
+                "tt_betcount", "tt_position"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE teamtip_members ADD COLUMN {col} INTEGER")
     conn.commit()
 
 
@@ -247,6 +267,7 @@ def init_and_seed(force=False):
     _migrate(conn)
     conn.executescript(SCHEMA)
     _migrate_users(conn)
+    _migrate_members(conn)
     _seed(conn)
     _ensure_admin(conn)
     _ensure_admin_active(conn)
@@ -371,16 +392,27 @@ def set_slot_ratings(conn, user_id, slots):
 
 
 # ---------- teamtip group members (read-only ghost accounts) ----------
-def upsert_member(conn, betgame_id, fk_user, display_name, owner_user_id):
+def upsert_member(conn, betgame_id, fk_user, display_name, owner_user_id,
+                  ranking=None):
+    """Insert/update a ghost member. `ranking` (optional) carries teamtip's own
+    authoritative numbers: dict with points/exact/goaldiff/tendency/betcount/position."""
     now = _now()
+    r = ranking or {}
     conn.execute(
         """INSERT INTO teamtip_members(betgame_id,fk_user,display_name,owner_user_id,
-             first_seen,last_seen) VALUES(?,?,?,?,?,?)
+             tt_points,tt_exact,tt_goaldiff,tt_tendency,tt_betcount,tt_position,
+             first_seen,last_seen)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(betgame_id,fk_user) DO UPDATE SET
              display_name=excluded.display_name,
              owner_user_id=excluded.owner_user_id,
+             tt_points=excluded.tt_points, tt_exact=excluded.tt_exact,
+             tt_goaldiff=excluded.tt_goaldiff, tt_tendency=excluded.tt_tendency,
+             tt_betcount=excluded.tt_betcount, tt_position=excluded.tt_position,
              last_seen=excluded.last_seen""",
-        (str(betgame_id), int(fk_user), display_name, owner_user_id, now, now))
+        (str(betgame_id), int(fk_user), display_name, owner_user_id,
+         r.get("points"), r.get("exact"), r.get("goaldiff"), r.get("tendency"),
+         r.get("betcount"), r.get("position"), now, now))
 
 
 def upsert_member_tip(conn, betgame_id, fk_user, match_id, home, away):
@@ -394,7 +426,8 @@ def upsert_member_tip(conn, betgame_id, fk_user, match_id, home, away):
 
 def get_members(conn) -> list[dict]:
     return [dict(r) for r in conn.execute(
-        "SELECT betgame_id,fk_user,display_name FROM teamtip_members")]
+        "SELECT betgame_id,fk_user,display_name,tt_points,tt_exact,tt_goaldiff,"
+        "tt_tendency,tt_betcount,tt_position FROM teamtip_members")]
 
 
 def get_member_tips(conn) -> dict:

@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v19";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v20";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -646,6 +646,70 @@ let PROG_HIDDEN = new Set();
 const PROG_COLORS = ["#C8102E","#0E7C7B","#1F6FB2","#E0561F","#6A359C","#2E8B57",
   "#A61E4D","#5E7A1E","#2C3E8C","#8B4A2B","#CC6B1F","#A9821B","#3D5A6C","#B3122B"];
 
+/* ---------- by-matchday predictions grid ---------- */
+let MD_LIST = null;        // [{date,index,matches,finished}]
+let MD_SEL = null;         // selected date
+async function loadMatchdays(){
+  const r = await fetch("/api/matchdays");
+  if(!r.ok) return;
+  MD_LIST = (await r.json()).matchdays || [];
+  const sel = document.getElementById("mdSel");
+  if(!MD_LIST.length){ sel.innerHTML=""; document.getElementById("mdTable").innerHTML=""; return; }
+  // default: latest matchday that has any finished match, else the first
+  if(!MD_SEL || !MD_LIST.some(d=>d.date===MD_SEL)){
+    const played = [...MD_LIST].reverse().find(d=>d.finished>0);
+    MD_SEL = (played || MD_LIST[0]).date;
+  }
+  sel.innerHTML = MD_LIST.map(d=>{
+    const lbl = `MD ${d.index} · ${d.date}` + (d.finished?` (${d.finished}/${d.matches})`:"");
+    return `<option value="${d.date}" ${d.date===MD_SEL?"selected":""}>${lbl}</option>`;
+  }).join("");
+  await loadMatchdayGrid();
+}
+async function loadMatchdayGrid(){
+  MD_SEL = document.getElementById("mdSel").value || MD_SEL;
+  const r = await fetch(`/api/matchday/${MD_SEL}`);
+  if(!r.ok){ document.getElementById("mdTable").innerHTML = `<p class="note">Couldn't load this matchday.</p>`; return; }
+  renderMatchdayGrid(await r.json());
+}
+function mdCellHTML(cell){
+  if(cell===null) return `<td class="mdcell hidden" title="Hidden until kickoff">·</td>`;
+  if(!cell.tip)   return `<td class="mdcell none">–</td>`;
+  const cls = cell.outcome ? ` ${cell.outcome}` : "";
+  const pts = (cell.points!=null) ? `<span class="mdpts">${cell.points}</span>` : "";
+  return `<td class="mdcell${cls}">${fmtEl(cell.tip)}${pts}</td>`;
+}
+function renderMatchdayGrid(d){
+  const onlyGhosts = d.rows.every(r=>r.kind==="teamtip");
+  document.getElementById("mdEmpty").hidden = d.rows.some(r=>r.kind==="teamtip");
+  const meta = document.getElementById("mdMeta");
+  const played = d.matches.filter(m=>m.status==="finished").length;
+  meta.textContent = `${d.matches.length} match${d.matches.length===1?"":"es"} · ${played} played · ${d.rows.length} player${d.rows.length===1?"":"s"}`;
+  if(!d.rows.length){ document.getElementById("mdTable").innerHTML = `<p class="note">No players to show.</p>`; return; }
+  // header: player | each match (home–away) | MD pts
+  const head = `<tr>
+    <th class="mdname">Player</th>
+    ${d.matches.map(m=>`<th class="mdmatch ${m.revealed?'':'locked'}" title="${fmtEl(m.home)} v ${fmtEl(m.away)} · ${fmtEl(m.kickoff_et)} ET${m.result?` · ${m.result}`:''}">
+        <span class="mh">${fmtEl(teamAbbr(m.home))}</span><span class="mv">${fmtEl(teamAbbr(m.away))}</span>
+        ${m.result?`<span class="mres">${m.result}</span>`:(m.revealed?'':'<span class="mlock">🔒</span>')}
+      </th>`).join("")}
+    <th class="mdtot">Pts</th>
+  </tr>`;
+  const body = d.rows.map((row,i)=>`
+    <tr class="${row.is_self?'self':''} ${row.kind==='teamtip'?'ghost':''}">
+      <td class="mdname"><span class="mdrk">${i+1}</span>${fmtEl(row.name)}${row.kind==='teamtip'?'<span class="ghosttag" title="Imported from teamtip">tt</span>':''}</td>
+      ${d.matches.map(m=>mdCellHTML(row.cells[m.id])).join("")}
+      <td class="mdtot"><b>${row.matchday_points}</b></td>
+    </tr>`).join("");
+  document.getElementById("mdTable").innerHTML =
+    `<table class="mdtbl"><thead>${head}</thead><tbody>${body}</tbody></table>
+     <div class="mdkey"><span class="mdcell exact">exact ${d.scheme.exact}</span>
+       <span class="mdcell goaldiff">goal diff ${d.scheme.goaldiff}</span>
+       <span class="mdcell tendency">tendency ${d.scheme.tendency}</span>
+       <span class="mdcell hidden">· hidden until kickoff</span></div>`;
+}
+function teamAbbr(name){ return (name||"").length>11 ? name.slice(0,10)+"…" : (name||""); }
+
 async function loadProgress(){
   const r = await fetch("/api/progress");
   if(!r.ok) return;
@@ -798,8 +862,10 @@ document.querySelectorAll("nav.tabs button").forEach(b=>{
     document.querySelectorAll("nav.tabs button").forEach(x=>x.setAttribute("aria-selected", x===b));
     document.querySelectorAll("section.view").forEach(v=>v.classList.toggle("active", v.id===b.dataset.view));
     if(b.dataset.view==="progress") loadProgress();
+    if(b.dataset.view==="matchday") loadMatchdays();
   };
 });
+document.getElementById("mdSel").onchange = loadMatchdayGrid;
 document.querySelectorAll("#schedSub button").forEach(b=>{
   b.onclick = ()=>{
     document.querySelectorAll("#schedSub button").forEach(x=>x.setAttribute("aria-selected", x===b));

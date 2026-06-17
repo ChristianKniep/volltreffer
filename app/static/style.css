@@ -414,4 +414,36 @@ table.tbl td.pts{font-weight:700}
 .pred .ps.ov i{color:#6a359c}
 .pred .ps.ov{border-color:#6a359c}
 
+/* by-matchday predictions grid */
+.mdbar{display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap}
+.mdbar label{font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)}
+.mdbar select{padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--card,#fff); font:inherit}
+.mdmeta{font-size:12px; color:var(--muted)}
+.mdtablewrap{overflow-x:auto; border:1px solid var(--line); border-radius:8px}
+.mdtbl{border-collapse:collapse; width:100%; font-size:12px}
+.mdtbl th,.mdtbl td{border-bottom:1px solid var(--line); padding:5px 7px; text-align:center; white-space:nowrap}
+.mdtbl thead th{position:sticky; top:0; background:var(--card,#fff); z-index:1; vertical-align:bottom}
+.mdtbl th.mdname,.mdtbl td.mdname{text-align:left; position:sticky; left:0; background:var(--card,#fff); z-index:1}
+.mdtbl td.mdname{font-weight:600}
+.mdrk{display:inline-block; min-width:18px; color:var(--muted); font-variant-numeric:tabular-nums}
+.ghosttag{display:inline-block; margin-left:5px; padding:0 4px; font-size:9px; font-weight:700; color:#fff; background:#0e7c7b; border-radius:3px; vertical-align:middle}
+.mdtbl th.mdmatch{font-size:10px; line-height:1.15}
+.mdtbl th.mdmatch .mh,.mdtbl th.mdmatch .mv{display:block}
+.mdtbl th.mdmatch .mv{color:var(--muted)}
+.mdtbl th.mdmatch.locked{opacity:.6}
+.mres{display:block; font-weight:700; color:#111; margin-top:2px}
+.mlock{display:block; margin-top:2px}
+.mdcell{font-variant-numeric:tabular-nums}
+.mdcell.none{color:#bbb}
+.mdcell.hidden{color:#ccc}
+.mdcell .mdpts{display:inline-block; margin-left:4px; min-width:12px; font-size:10px; font-weight:700; color:#fff; background:#9b9082; border-radius:8px; padding:0 4px}
+.mdcell.exact{background:#d8f5dd} .mdcell.exact .mdpts{background:#1e9e4a}
+.mdcell.goaldiff{background:#eef7d8} .mdcell.goaldiff .mdpts{background:#7aa01e}
+.mdcell.tendency{background:#fdf2d8} .mdcell.tendency .mdpts{background:#d4a017}
+.mdcell.miss{background:#fbeaea}
+.mdtbl tr.self td.mdname{box-shadow:inset 3px 0 0 var(--accent,#c8102e)}
+.mdtbl td.mdtot b{font-variant-numeric:tabular-nums}
+.mdkey{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; font-size:11px}
+.mdkey .mdcell{padding:2px 8px; border-radius:4px}
+
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}

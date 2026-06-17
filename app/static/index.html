@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=19">
+<link rel="stylesheet" href="/static/style.css?v=20">
 </head>
 <body>
 <header class="top">
@@ -32,6 +32,7 @@
     <button role="tab" aria-selected="false" data-view="groups">Groups</button>
     <button role="tab" aria-selected="false" data-view="bracket">Bracket</button>
     <button role="tab" aria-selected="false" data-view="leaderboard">Leaderboard</button>
+    <button role="tab" aria-selected="false" data-view="matchday">By matchday</button>
     <button role="tab" aria-selected="false" data-view="progress">Progress</button>
     <button role="tab" aria-selected="false" data-view="settings">Settings</button>
     <button role="tab" aria-selected="false" data-view="admin" id="adminTab" hidden>Admin</button>
@@ -92,6 +93,13 @@
     <div class="lblegend" id="lbLegend"></div>
     <div class="lbtable" id="lbTable"></div>
     <p class="note">Points: exact score, correct goal difference, or correct tendency (right winner/draw). A correct non-exact draw counts as goal difference. Hover any match (after kickoff) to see everyone's tip for that game.</p>
+  </section>
+
+  <section class="view" id="matchday" role="tabpanel">
+    <div class="viewhead"><h2>By matchday</h2><p>Everyone's predictions for one matchday — your pool plus imported teamtip players. Each cell shows the tip and points earned; columns reveal once kickoff passes.</p></div>
+    <div class="mdbar"><label for="mdSel">Matchday</label><select id="mdSel"></select><span class="mdmeta" id="mdMeta"></span></div>
+    <div class="mdtablewrap"><div class="mdtable" id="mdTable"></div></div>
+    <p class="note" id="mdEmpty" hidden>No teamtip players imported yet. Add your teamtip credentials in <b>Settings</b>, then run <b>Update results</b> (or sync the group) to mirror your betgame here.</p>
   </section>
 
   <section class="view" id="progress" role="tabpanel">
@@ -209,6 +217,6 @@ update my prediction for that match. Afterwards, show me the diff.</code></pre>
 
 <div id="toast"></div>
 <div id="tipPop" class="tippop" hidden></div>
-<script src="/static/app.js?v=19"></script>
+<script src="/static/app.js?v=20"></script>
 </body>
 </html>

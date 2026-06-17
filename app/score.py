@@ -1,20 +1,25 @@
 """Scoring for the betting pool.
 
-Standard German prediction-pool scheme (Kicktipp / teamtip default), point
-values overridable via env:
+Defaults match **teamtip.net**'s scheme so our leaderboard agrees with teamtip's
+own ranking. Point values are overridable via env:
 
-  exact score        -> SCORE_EXACT     (default 4)
-  correct goal diff  -> SCORE_GOALDIFF  (default 3)   # includes a non-exact correct draw
-  correct tendency   -> SCORE_TENDENCY  (default 2)   # right winner/draw, wrong margin
+  exact score        -> SCORE_EXACT     (default 3)
+  correct goal diff  -> SCORE_GOALDIFF  (default 2)   # includes a non-exact correct draw
+  correct tendency   -> SCORE_TENDENCY  (default 1)   # right winner/draw, wrong margin
   miss               -> 0
 
 Precedence is exact > goaldiff > tendency > miss.
+
+NB: for imported teamtip ghost members the leaderboard uses teamtip's *own*
+points_total (stored on teamtip_members) as the source of truth — see main.py.
+This scheme is what we apply to native app users' tips so they score on the same
+basis. Keep the two aligned (or override SCORE_* to match a different betgame).
 """
 import os
 
-EXACT = int(os.environ.get("SCORE_EXACT", "4"))
-GOALDIFF = int(os.environ.get("SCORE_GOALDIFF", "3"))
-TENDENCY = int(os.environ.get("SCORE_TENDENCY", "2"))
+EXACT = int(os.environ.get("SCORE_EXACT", "3"))
+GOALDIFF = int(os.environ.get("SCORE_GOALDIFF", "2"))
+TENDENCY = int(os.environ.get("SCORE_TENDENCY", "1"))
 
 LABEL = {"exact": "exact", "goaldiff": "goal diff", "tendency": "tendency", "miss": "miss"}
 POINTS = {"exact": EXACT, "goaldiff": GOALDIFF, "tendency": TENDENCY, "miss": 0}
