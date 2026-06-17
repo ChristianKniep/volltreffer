@@ -944,26 +944,122 @@ def api_teamtip_sync_group(user=Depends(auth.current_user)):
     return out
 
 
+def _progress_subjects(conn, view):
+    """All subjects (app users + teamtip ghosts) honoring the account view, as
+    {subject_id: {"name","kind","tips":{match_id:(h,a)}}}."""
+    out = {}
+    ghost_names = _ghost_name_set(conn)
+    if view in ("local", "both"):
+        user_tips = _user_match_tips(conn)
+        for uid, uname in _approved_usernames(conn).items():
+            if view == "both" and (uname or "").strip().lower() in ghost_names:
+                continue
+            out[f"u{uid}"] = {"name": uname, "kind": "user",
+                              "tips": user_tips.get(uid, {})}
+    if view in ("ghosts", "both"):
+        member_tips = db.get_member_tips(conn)
+        for m in db.get_members(conn):
+            sid = f"{m['betgame_id']}:{m['fk_user']}"
+            out[sid] = {"name": m["display_name"], "kind": "teamtip",
+                        "tips": member_tips.get((m["betgame_id"], m["fk_user"]), {})}
+    return out
+
+
+def _progress_steps(conn, granularity):
+    """Ordered list of (step_key, step_label, [match_ids]) over FINISHED matches,
+    grouped by the chosen granularity. 'match' = one per game, 'day' = per kickoff
+    calendar date, 'round' = per group round / KO round. Chronological by kickoff."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT id,kickoff_et,home_team,away_team,home_ref,away_ref FROM matches "
+        "WHERE status='finished' ORDER BY kickoff_et, match_no")]
+    if not rows:
+        return []
+    if granularity == "match":
+        steps = []
+        for m in rows:
+            h = m["home_team"] or m["home_ref"]
+            a = m["away_team"] or m["away_ref"]
+            steps.append((m["id"], f"{h}–{a}", [m["id"]]))
+        return steps
+    if granularity == "day":
+        buckets = {}
+        for m in rows:
+            buckets.setdefault(m["kickoff_et"][:10], []).append(m["id"])
+        return [(d, d, ids) for d, ids in sorted(buckets.items())]
+    # round
+    keys = _matchday_keys(conn)
+    order = {}
+    buckets = {}
+    for m in rows:
+        k, label, o = keys[m["id"]]
+        order[k] = (o, label)
+        buckets.setdefault(k, []).append(m["id"])
+    return [(k, order[k][1], buckets[k]) for k in sorted(buckets, key=lambda k: order[k][0])]
+
+
 @app.get("/api/progress")
-def api_progress(user=Depends(auth.current_user)):
-    """Per-subject series across matchdays (points + rank) for the charts."""
+def api_progress(view: str = "ghosts", granularity: str = "round",
+                 user=Depends(auth.current_user)):
+    """Cumulative standings over time, computed deterministically from tips +
+    results (no reliance on click-time snapshots). `granularity` ∈ match|day|round,
+    `view` ∈ ghosts|local|both. For each step returns every subject's cumulative
+    points & rank plus the per-step gains broken into exact/goaldiff/tendency."""
+    if view not in ACCOUNT_VIEWS:
+        view = "both"
+    if granularity not in ("match", "day", "round"):
+        granularity = "round"
     conn = db.connect()
     try:
-        snaps = db.get_snapshots(conn)
+        subjects = _progress_subjects(conn, view)
+        results = _finished_results(conn)
+        steps = _progress_steps(conn, granularity)
     finally:
         conn.close()
-    matchdays = sorted({s["matchday"] for s in snaps})
-    series = {}
-    for s in snaps:
-        sid = s["subject_id"]
-        e = series.setdefault(sid, {
-            "subject_id": sid, "kind": s["subject_kind"],
-            "name": s["display_name"], "points": {}, "rank": {},
-        })
-        e["name"] = s["display_name"]
-        e["points"][s["matchday"]] = s["points"]
-        e["rank"][s["matchday"]] = s["rank"]
-    return {"matchdays": matchdays, "series": list(series.values())}
+
+    # running cumulative state per subject
+    cum = {sid: {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0}
+           for sid in subjects}
+    series = {sid: {"subject_id": sid, "name": s["name"], "kind": s["kind"],
+                    "points": [], "rank": [], "gains": []}
+              for sid, s in subjects.items()}
+    step_meta = []
+
+    for skey, slabel, mids in steps:
+        # per-step gains for each subject
+        for sid, s in subjects.items():
+            g = {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0}
+            for mid in mids:
+                if mid not in results:
+                    continue
+                t = s["tips"].get(mid)
+                if not t:
+                    continue
+                cls = SC.classify(t[0], t[1], *results[mid])
+                if cls == "miss":
+                    continue
+                g[cls] += 1
+                g["points"] += SC.POINTS[cls]
+            c = cum[sid]
+            c["points"] += g["points"]; c["exact"] += g["exact"]
+            c["goaldiff"] += g["goaldiff"]; c["tendency"] += g["tendency"]
+            series[sid]["gains"].append(g)
+            series[sid]["points"].append(c["points"])
+        # rank at this step (standard competition ranking, ties share a rank)
+        ordered = sorted(subjects, key=lambda sid: (
+            -cum[sid]["points"], -cum[sid]["exact"], -cum[sid]["goaldiff"],
+            -cum[sid]["tendency"], series[sid]["name"].lower()))
+        rank = 0; prev = None
+        for i, sid in enumerate(ordered, 1):
+            c = cum[sid]
+            keyv = (c["points"], c["exact"], c["goaldiff"], c["tendency"])
+            if keyv != prev:
+                rank = i; prev = keyv
+            series[sid]["rank"].append(rank)
+        step_meta.append({"key": skey, "label": slabel, "matches": len(mids)})
+
+    return {"granularity": granularity, "view": view,
+            "steps": step_meta, "series": list(series.values()),
+            "scheme": SC.scheme()}
 
 
 # Knockout rounds in tournament order, with display labels.

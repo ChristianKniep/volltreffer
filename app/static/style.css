@@ -364,14 +364,35 @@ table.tbl td.pts{font-weight:700}
   background:var(--tile); border:1px solid var(--line); border-radius:999px; padding:1px 6px; margin-left:6px}
 
 /* ---------- progress charts ---------- */
-.chartwrap{background:var(--tile); border:1px solid var(--line); border-radius:12px;
-  padding:10px; overflow-x:auto}
-#progChart{max-width:100%; height:auto; display:block}
-.charlegend{display:flex; gap:6px; flex-wrap:wrap; margin-top:12px}
+.progbars{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:12px}
+.progfocus{font-family:'Saira Condensed',sans-serif; font-size:12px; color:var(--ink2); display:inline-flex; gap:6px; align-items:center}
+.progfocus select{font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:6px}
+.chartwrap{position:relative; background:var(--tile); border:1px solid var(--line); border-radius:12px; padding:10px}
+#progChart{max-width:100%; display:block}
+.charlegend{display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; align-items:center}
+.charlegend .leghead{font-size:12px; color:var(--ink2); font-weight:700}
 .legitem{display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;
   background:var(--tile); border:1px solid var(--line); border-radius:999px; padding:3px 10px; color:var(--ink)}
+.legitem.static{cursor:default}
 .legitem .swatch{width:11px; height:11px; border-radius:50%; flex:none}
 .legitem.off{opacity:.4; text-decoration:line-through}
+/* column-hover tooltip (everyone's standing at a step) */
+.progtip{position:absolute; z-index:20; pointer-events:none; background:#fff;
+  border:1px solid var(--line); border-radius:8px; box-shadow:0 6px 22px rgba(0,0,0,.16);
+  padding:8px 10px; font-size:12px; min-width:190px; max-height:430px; overflow:auto}
+.progtip .pthead{font-weight:700; margin-bottom:5px; font-size:12px}
+.progtip .ptcols{display:grid; grid-template-columns:20px 12px 1fr auto auto; gap:6px;
+  font-size:10px; color:var(--ink2); text-transform:uppercase; letter-spacing:.03em; margin-bottom:3px}
+.progtip .ptrow{display:grid; grid-template-columns:20px 12px 1fr auto auto; gap:6px; align-items:center; padding:1px 0}
+.progtip .ptrow.user .ptnm{font-weight:700}
+.progtip .ptrk{text-align:right; color:var(--ink2); font-variant-numeric:tabular-nums}
+.progtip .ptsw{width:10px; height:10px; border-radius:50%}
+.progtip .ptnm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.progtip .ptpt{font-weight:700; font-variant-numeric:tabular-nums; text-align:right}
+.progtip .ptgain{font-size:11px; color:#1e9e4a; font-weight:700; text-align:right}
+.progtip .ptgain.z{color:#ccc}
+.progtip .ptrow.tot{border-top:1px solid var(--line); margin-top:4px; padding-top:4px; grid-template-columns:1fr auto}
+.progtip .ptrow.tot .ptnm{font-weight:700}
 .toknote{font-size:12px; color:var(--ink2); margin:2px 0 8px}
 .toknote.err{color:var(--accent); font-weight:600}
 

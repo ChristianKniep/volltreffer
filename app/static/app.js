@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v25";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v26";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -656,12 +656,17 @@ async function loadLeaderboard(){
       <tbody>${rows}</tbody></table>`;
 }
 
-/* ---------- progress charts ---------- */
-let PROG_DATA = null;       // {matchdays, series}
-let PROG_METRIC = "rank";   // "rank" | "points"
+/* ---------- progress charts (uPlot) ---------- */
+let PROG_DATA = null;        // {granularity, view, steps, series, scheme}
+let PROG_METRIC = "rank";    // "rank" | "points" | "gains"
+let PROG_GRAN = localStorage.getItem("wc_prog_gran") || "round";
 let PROG_HIDDEN = new Set();
+let PROG_FOCUS = null;        // subject_id for the gains-bar mode
+let uplot = null;            // current uPlot instance
 const PROG_COLORS = ["#C8102E","#0E7C7B","#1F6FB2","#E0561F","#6A359C","#2E8B57",
-  "#A61E4D","#5E7A1E","#2C3E8C","#8B4A2B","#CC6B1F","#A9821B","#3D5A6C","#B3122B"];
+  "#A61E4D","#5E7A1E","#2C3E8C","#8B4A2B","#CC6B1F","#A9821B","#3D5A6C","#B3122B",
+  "#7A1FA2","#1F9E4A","#B06A1E","#4A6FA5","#9E2B5E","#3E7A3E"];
+const GAIN_COLORS = {exact:"#1e9e4a", goaldiff:"#7aa01e", tendency:"#d4a017"};
 
 /* ---------- by-matchday predictions grid (grouped by round) ---------- */
 let MD_LIST = null;        // [{key,label,index,matches,finished}]
@@ -739,28 +744,45 @@ const TEAM3 = {"South Korea":"KOR","South Africa":"RSA","Saudi Arabia":"KSA","Ne
   "Iraq":"IRQ","Qatar":"QAT","Jordan":"JOR","Haiti":"HAI","Curaçao":"CUW","Türkiye":"TUR","USA":"USA"};
 function teamAbbr(name){ return TEAM3[name] || (name||"").slice(0,3).toUpperCase(); }
 
+function progColor(i){ return PROG_COLORS[i % PROG_COLORS.length]; }
+function progSeriesColor(s, i){ return s.kind==="user" ? "#111" : progColor(i); }
+
 async function loadProgress(){
-  const r = await fetch("/api/progress");
+  const r = await fetch(`/api/progress?view=${encodeURIComponent(ACCOUNT_VIEW)}&granularity=${encodeURIComponent(PROG_GRAN)}`);
   if(!r.ok) return;
   PROG_DATA = await r.json();
-  const empty = !PROG_DATA.matchdays.length;
+  const empty = !PROG_DATA.steps.length;
   document.getElementById("progEmpty").hidden = !empty;
   document.getElementById("progChart").style.display = empty ? "none" : "";
-  if(empty){ document.getElementById("progLegend").innerHTML=""; return; }
+  document.getElementById("progGran").querySelectorAll("button").forEach(b=>
+    b.setAttribute("aria-selected", b.dataset.gran===PROG_GRAN));
+  if(empty){ document.getElementById("progLegend").innerHTML=""; if(uplot){uplot.destroy(); uplot=null;} return; }
+  // focus selector only used in gains mode
+  const fw = document.getElementById("progFocusWrap");
+  fw.hidden = PROG_METRIC!=="gains";
+  if(PROG_METRIC==="gains"){
+    if(!PROG_FOCUS || !PROG_DATA.series.some(s=>s.subject_id===PROG_FOCUS))
+      PROG_FOCUS = PROG_DATA.series[0].subject_id;
+    document.getElementById("progFocus").innerHTML = PROG_DATA.series
+      .map(s=>`<option value="${attrEsc(s.subject_id)}" ${s.subject_id===PROG_FOCUS?"selected":""}>${fmtEl(s.name)}</option>`).join("");
+  }
   renderProgLegend();
   drawProgress();
 }
 
-function progColor(i){ return PROG_COLORS[i % PROG_COLORS.length]; }
-
 function renderProgLegend(){
   const leg = document.getElementById("progLegend");
+  if(PROG_METRIC==="gains"){
+    leg.innerHTML = `<span class="leghead">Gains:</span>`+
+      ["exact","goaldiff","tendency"].map(k=>`<span class="legitem static"><span class="swatch" style="background:${GAIN_COLORS[k]}"></span>${k} (${PROG_DATA.scheme[k]})</span>`).join("");
+    return;
+  }
   leg.innerHTML = PROG_DATA.series.map((s,i)=>{
     const off = PROG_HIDDEN.has(s.subject_id) ? " off" : "";
-    return `<button class="legitem${off}" data-sid="${fmtEl(s.subject_id)}">
-      <span class="swatch" style="background:${progColor(i)}"></span>${fmtEl(s.name)}</button>`;
+    return `<button class="legitem${off}" data-sid="${attrEsc(s.subject_id)}">
+      <span class="swatch" style="background:${progSeriesColor(s,i)}"></span>${fmtEl(s.name)}</button>`;
   }).join("");
-  leg.querySelectorAll(".legitem").forEach(b=>{
+  leg.querySelectorAll(".legitem[data-sid]").forEach(b=>{
     b.onclick = ()=>{
       const sid = b.dataset.sid;
       if(PROG_HIDDEN.has(sid)) PROG_HIDDEN.delete(sid); else PROG_HIDDEN.add(sid);
@@ -770,60 +792,133 @@ function renderProgLegend(){
   });
 }
 
+function chartSize(){
+  const wrap = document.querySelector("#progress .chartwrap");
+  return { width: Math.max(320, wrap.clientWidth-2), height: 460 };
+}
+
 function drawProgress(){
-  if(!PROG_DATA || !PROG_DATA.matchdays.length) return;
-  const cv = document.getElementById("progChart");
-  const ctx = cv.getContext("2d");
-  const W = cv.width, H = cv.height;
-  const padL = 44, padR = 16, padT = 16, padB = 34;
-  ctx.clearRect(0,0,W,H);
-  const mds = PROG_DATA.matchdays;
-  const isRank = PROG_METRIC === "rank";
-  // value range
-  let vmin = Infinity, vmax = -Infinity;
-  PROG_DATA.series.forEach(s=>{
-    mds.forEach(md=>{ const v=s[PROG_METRIC][md]; if(v!=null){ vmin=Math.min(vmin,v); vmax=Math.max(vmax,v);} });
-  });
-  if(!isFinite(vmin)){ return; }
-  if(isRank){ vmin=1; vmax=Math.max(vmax, PROG_DATA.series.length); }
-  else { vmin=0; vmax=Math.max(vmax,1); }
-  const xN = Math.max(mds.length-1, 1);
-  const X = i => padL + (W-padL-padR) * (i/xN);
-  // rank: smaller is better -> invert so #1 is at the top
-  const Y = v => isRank
-    ? padT + (H-padT-padB) * ((v-vmin)/(vmax-vmin||1))
-    : padT + (H-padT-padB) * (1 - (v-vmin)/(vmax-vmin||1));
-  // gridlines + y labels
-  ctx.strokeStyle="#e6e0d6"; ctx.fillStyle="#8a8170"; ctx.font="11px system-ui,sans-serif";
-  const ticks = 5;
-  for(let t=0;t<=ticks;t++){
-    const v = vmin + (vmax-vmin)*(t/ticks);
-    const y = Y(v);
-    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
-    ctx.fillText(isRank ? Math.round(v) : Math.round(v), 6, y+4);
-  }
-  // x labels (matchday = # finished)
-  ctx.textAlign="center";
-  mds.forEach((md,i)=>{ ctx.fillText(md, X(i), H-12); });
-  ctx.textAlign="left";
-  ctx.fillText("matches played", padL, H-1);
-  // lines
+  if(!PROG_DATA || !PROG_DATA.steps.length) return;
+  if(uplot){ uplot.destroy(); uplot = null; }
+  const el = document.getElementById("progChart");
+  el.innerHTML = "";
+  const xs = PROG_DATA.steps.map((_,i)=>i);
+  const labels = PROG_DATA.steps.map(s=>s.label);
+  const sz = chartSize();
+
+  if(PROG_METRIC==="gains"){ drawGains(el, xs, labels, sz); return; }
+
+  const isRank = PROG_METRIC==="rank";
+  const data = [xs];
+  const series = [{}];
   PROG_DATA.series.forEach((s,i)=>{
-    if(PROG_HIDDEN.has(s.subject_id)) return;
-    ctx.strokeStyle = progColor(i); ctx.lineWidth = s.kind==="user" ? 3 : 1.8;
-    ctx.beginPath(); let started=false;
-    mds.forEach((md,xi)=>{
-      const v = s[PROG_METRIC][md]; if(v==null) return;
-      const x=X(xi), y=Y(v);
-      if(!started){ ctx.moveTo(x,y); started=true; } else ctx.lineTo(x,y);
-    });
-    ctx.stroke();
-    // end dots
-    mds.forEach((md,xi)=>{
-      const v=s[PROG_METRIC][md]; if(v==null) return;
-      ctx.fillStyle=progColor(i); ctx.beginPath(); ctx.arc(X(xi),Y(v),2.6,0,7); ctx.fill();
+    data.push(s[PROG_METRIC].map(v=>v));
+    series.push({
+      label: s.name, stroke: progSeriesColor(s,i),
+      width: s.kind==="user"?3:1.6,
+      points:{show:true, size:4},
+      show: !PROG_HIDDEN.has(s.subject_id),
     });
   });
+  const opts = {
+    ...sz,
+    scales:{ x:{time:false}, y: isRank ? {dir:-1, range:(u,min,max)=>[Math.max(1,max), 1]} : {} },
+    axes:[
+      { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} },
+      { label: isRank?"rank":"points" },
+    ],
+    legend:{show:false},
+    cursor:{ focus:{prox:24}, points:{size:7} },
+    hooks:{ setCursor:[u=>showProgTip(u, labels)] },
+    series,
+  };
+  uplot = new uPlot(opts, data, el);
+  el.onmouseleave = ()=>{ document.getElementById("progTip").hidden=true; };
+}
+
+// stacked-bar "gains per step" for the focused player
+function drawGains(el, xs, labels, sz){
+  const s = PROG_DATA.series.find(x=>x.subject_id===PROG_FOCUS) || PROG_DATA.series[0];
+  const ex = s.gains.map(g=>g.exact*PROG_DATA.scheme.exact);
+  const gd = s.gains.map(g=>g.goaldiff*PROG_DATA.scheme.goaldiff);
+  const te = s.gains.map(g=>g.tendency*PROG_DATA.scheme.tendency);
+  const data = [xs, ex, gd, te];
+  const stacked = (i)=> (u,sidx,didx)=> null; // drawn manually below
+  const opts = {
+    ...sz,
+    scales:{ x:{time:false}, y:{} },
+    axes:[
+      { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} },
+      { label:`points gained — ${s.name}` },
+    ],
+    legend:{show:false},
+    cursor:{ focus:{prox:1e6}, points:{show:false} },
+    hooks:{ setCursor:[u=>showGainsTip(u, labels, s)],
+            draw:[u=>drawStackedBars(u, ex, gd, te)] },
+    series:[{}, {label:"exact"}, {label:"goaldiff"}, {label:"tendency"}],
+  };
+  uplot = new uPlot(opts, data, el);
+  el.onmouseleave = ()=>{ document.getElementById("progTip").hidden=true; };
+}
+
+function drawStackedBars(u, ex, gd, te){
+  const ctx = u.ctx;
+  const n = u.data[0].length;
+  const bw = Math.max(4, (u.bbox.width/n)*0.6);
+  for(let i=0;i<n;i++){
+    const xc = u.valToPos(i, "x", true);
+    let base = u.valToPos(0, "y", true);
+    [[ex[i],GAIN_COLORS.exact],[gd[i],GAIN_COLORS.goaldiff],[te[i],GAIN_COLORS.tendency]].forEach(([val,col])=>{
+      if(!val) return;
+      const top = u.valToPos((u.posToVal(base,"y")+val), "y", true);
+      ctx.fillStyle = col;
+      ctx.fillRect(xc-bw/2, top, bw, base-top);
+      base = top;
+    });
+  }
+}
+
+function shortLabel(l){ return l.length>14 ? l.slice(0,13)+"…" : l; }
+
+// column hover: show ALL players' standing at the hovered step, color-coded
+function showProgTip(u, labels){
+  const tip = document.getElementById("progTip");
+  const idx = u.cursor.idx;
+  if(idx==null){ tip.hidden=true; return; }
+  const isRank = PROG_METRIC==="rank";
+  const rows = PROG_DATA.series.map((s,i)=>({
+    name:s.name, kind:s.kind, color:progSeriesColor(s,i),
+    pts:s.points[idx], rank:s.rank[idx], gain:s.gains[idx],
+  })).sort((a,b)=> a.rank-b.rank || b.pts-a.pts);
+  const body = rows.map(r=>`<div class="ptrow ${r.kind}">
+    <span class="ptrk">${r.rank}</span>
+    <span class="ptsw" style="background:${r.color}"></span>
+    <span class="ptnm">${fmtEl(r.name)}</span>
+    <span class="ptpt">${r.pts}</span>
+    ${r.gain && r.gain.points ? `<span class="ptgain">+${r.gain.points}</span>`:`<span class="ptgain z">·</span>`}
+  </div>`).join("");
+  tip.innerHTML = `<div class="pthead">${fmtEl(labels[idx])}</div>
+    <div class="ptcols"><span></span><span></span><span>player</span><span>pts</span><span>Δ</span></div>${body}`;
+  placeProgTip(u, tip);
+}
+function showGainsTip(u, labels, s){
+  const tip = document.getElementById("progTip");
+  const idx = u.cursor.idx;
+  if(idx==null){ tip.hidden=true; return; }
+  const g = s.gains[idx];
+  tip.innerHTML = `<div class="pthead">${fmtEl(labels[idx])} · ${fmtEl(s.name)}</div>
+    <div class="ptrow"><span class="ptsw" style="background:${GAIN_COLORS.exact}"></span><span class="ptnm">exact</span><span class="ptpt">${g.exact}×${PROG_DATA.scheme.exact}</span></div>
+    <div class="ptrow"><span class="ptsw" style="background:${GAIN_COLORS.goaldiff}"></span><span class="ptnm">goal diff</span><span class="ptpt">${g.goaldiff}×${PROG_DATA.scheme.goaldiff}</span></div>
+    <div class="ptrow"><span class="ptsw" style="background:${GAIN_COLORS.tendency}"></span><span class="ptnm">tendency</span><span class="ptpt">${g.tendency}×${PROG_DATA.scheme.tendency}</span></div>
+    <div class="ptrow tot"><span class="ptnm">step total</span><span class="ptpt">+${g.points}</span></div>`;
+  placeProgTip(u, tip);
+}
+function placeProgTip(u, tip){
+  tip.hidden=false;
+  const wrap = document.querySelector("#progress .chartwrap").getBoundingClientRect();
+  let x = u.cursor.left + 14, y = 8;
+  if(x + tip.offsetWidth > wrap.width) x = u.cursor.left - tip.offsetWidth - 14;
+  tip.style.left = Math.max(2,x)+"px"; tip.style.top = y+"px";
 }
 
 /* ---------- per-game tips hover popover ---------- */
@@ -906,9 +1001,18 @@ document.querySelectorAll("#progSub button").forEach(b=>{
   b.onclick = ()=>{
     document.querySelectorAll("#progSub button").forEach(x=>x.setAttribute("aria-selected", x===b));
     PROG_METRIC = b.dataset.prog;
-    drawProgress();
+    // gains mode needs the focus selector populated -> go through loadProgress
+    if(PROG_METRIC==="gains") loadProgress(); else { document.getElementById("progFocusWrap").hidden=true; renderProgLegend(); drawProgress(); }
   };
 });
+document.querySelectorAll("#progGran button").forEach(b=>{
+  b.onclick = ()=>{
+    PROG_GRAN = b.dataset.gran;
+    localStorage.setItem("wc_prog_gran", PROG_GRAN);
+    loadProgress();
+  };
+});
+document.getElementById("progFocus").onchange = (e)=>{ PROG_FOCUS = e.target.value; drawProgress(); };
 document.getElementById("updateBtn").onclick = runUpdate;
 document.getElementById("appVer").textContent = APP_VERSION;
 

@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
-<link rel="stylesheet" href="/static/style.css?v=25">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<link rel="stylesheet" href="/static/style.css?v=26">
 </head>
 <body>
 <header class="top">
@@ -108,14 +109,23 @@
   </section>
 
   <section class="view" id="progress" role="tabpanel">
-    <div class="viewhead"><h2>Progress</h2><p>Rank and points over the tournament · snapshots taken on every results update</p></div>
-    <nav class="subtabs" id="progSub" role="tablist">
-      <button role="tab" data-prog="rank" aria-selected="true">Rank over time</button>
-      <button role="tab" data-prog="points" aria-selected="false">Points over time</button>
-    </nav>
-    <div class="chartwrap"><canvas id="progChart" width="900" height="460"></canvas></div>
+    <div class="viewhead"><h2>Progress</h2><p>Cumulative standings over the tournament, computed from every tip &amp; result. Hover a column to see everyone's standing at that point.</p></div>
+    <div class="progbars">
+      <nav class="subtabs" id="progSub" role="tablist" aria-label="Metric">
+        <button role="tab" data-prog="rank" aria-selected="true">Rank</button>
+        <button role="tab" data-prog="points" aria-selected="false">Points</button>
+        <button role="tab" data-prog="gains" aria-selected="false">Gains / step</button>
+      </nav>
+      <nav class="subtabs" id="progGran" role="tablist" aria-label="Granularity">
+        <button role="tab" data-gran="match" aria-selected="false">Per match</button>
+        <button role="tab" data-gran="day" aria-selected="false">Per day</button>
+        <button role="tab" data-gran="round" aria-selected="true">Per round</button>
+      </nav>
+      <label class="progfocus" id="progFocusWrap" hidden>Player <select id="progFocus"></select></label>
+    </div>
+    <div class="chartwrap"><div id="progChart"></div><div class="progtip" id="progTip" hidden></div></div>
     <div class="charlegend" id="progLegend"></div>
-    <p class="note" id="progEmpty" hidden>No snapshots yet. Run <b>Update results</b> (or sync the teamtip group) at least once to start recording progress.</p>
+    <p class="note" id="progEmpty" hidden>No finished matches yet. Enter results (or sync the teamtip group) to start the chart.</p>
   </section>
 
   <section class="view" id="settings" role="tabpanel">
@@ -222,6 +232,7 @@ update my prediction for that match. Afterwards, show me the diff.</code></pre>
 
 <div id="toast"></div>
 <div id="tipPop" class="tippop" hidden></div>
-<script src="/static/app.js?v=25"></script>
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/app.js?v=26"></script>
 </body>
 </html>
