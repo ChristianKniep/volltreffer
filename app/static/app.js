@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v21";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v22";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -458,13 +458,18 @@ function bindProvCards(){
     };
     const grp = card.querySelector(".p-group");
     if(grp) grp.onclick = async ()=>{
+      grp.disabled = true;
       msg.textContent = "Importing group…"; msg.className = "pmsg";
-      const r = await fetch("/api/teamtip/sync-group",{method:"POST"});
-      const d = await r.json().catch(()=>({}));
-      if(!r.ok){ msg.textContent = d.detail||"Group sync failed."; msg.className="pmsg err"; return; }
-      if(d.errors && d.errors.length){ msg.textContent = d.errors.join(" "); msg.className="pmsg warn"; }
-      else { msg.textContent = `Imported ${d.members} members, ${d.tips} tips.`; msg.className="pmsg ok"; }
-      await loadLeaderboard();
+      try{
+        const r = await fetch("/api/teamtip/sync-group",{method:"POST"});
+        const d = await r.json().catch(()=>({}));
+        if(!r.ok){ msg.textContent = d.detail||"Group sync failed."; msg.className="pmsg err"; toast(d.detail||"Group sync failed."); return; }
+        if(d.errors && d.errors.length){ msg.textContent = d.errors.join(" "); msg.className="pmsg warn"; toast(d.errors[0]); }
+        else { msg.textContent = `Imported ${d.members} players, ${d.tips} tips.`; msg.className="pmsg ok"; toast(`teamtip group synced: ${d.members} players, ${d.tips} tips.`); }
+        // refresh every view that shows players
+        await Promise.all([loadLeaderboard(), getState()]);
+        if(MD_LIST) await loadMatchdays();
+      } finally { grp.disabled = false; }
     };
     const del = card.querySelector(".p-del");
     if(del) del.onclick = async ()=>{
@@ -677,7 +682,7 @@ function mdCellHTML(cell){
   if(!cell.tip)   return `<td class="mdcell none">–</td>`;
   const cls = cell.outcome ? ` ${cell.outcome}` : "";
   const pts = (cell.points!=null) ? `<span class="mdpts">${cell.points}</span>` : "";
-  return `<td class="mdcell${cls}">${fmtEl(cell.tip)}${pts}</td>`;
+  return `<td class="mdcell${cls}"><span class="mdtip">${fmtEl(cell.tip)}</span>${pts}</td>`;
 }
 function renderMatchdayGrid(d){
   const onlyGhosts = d.rows.every(r=>r.kind==="teamtip");
@@ -702,14 +707,25 @@ function renderMatchdayGrid(d){
       ${d.matches.map(m=>mdCellHTML(row.cells[m.id])).join("")}
       <td class="mdtot"><b>${row.matchday_points}</b></td>
     </tr>`).join("");
+  const cols = `<colgroup><col class="mdcname">${d.matches.map(()=>`<col class="mdc">`).join("")}<col class="mdctot"></colgroup>`;
   document.getElementById("mdTable").innerHTML =
-    `<table class="mdtbl"><thead>${head}</thead><tbody>${body}</tbody></table>
+    `<table class="mdtbl">${cols}<thead>${head}</thead><tbody>${body}</tbody></table>
      <div class="mdkey"><span class="mdcell exact">exact ${d.scheme.exact}</span>
        <span class="mdcell goaldiff">goal diff ${d.scheme.goaldiff}</span>
        <span class="mdcell tendency">tendency ${d.scheme.tendency}</span>
        <span class="mdcell hidden">· hidden until kickoff</span></div>`;
 }
-function teamAbbr(name){ return (name||"").length>11 ? name.slice(0,10)+"…" : (name||""); }
+// 3-letter code so 24 match columns fit a page without horizontal scroll
+const TEAM3 = {"South Korea":"KOR","South Africa":"RSA","Saudi Arabia":"KSA","New Zealand":"NZL",
+  "Cape Verde":"CPV","Ivory Coast":"CIV","DR Congo":"COD","Czechia":"CZE","Uzbekistan":"UZB",
+  "Bosnia & Herzegovina":"BIH","Netherlands":"NED","Switzerland":"SUI","Australia":"AUS",
+  "Argentina":"ARG","Germany":"GER","Portugal":"POR","Morocco":"MAR","Senegal":"SEN",
+  "Colombia":"COL","Paraguay":"PAR","Uruguay":"URU","Ecuador":"ECU","Scotland":"SCO",
+  "England":"ENG","Croatia":"CRO","Belgium":"BEL","Norway":"NOR","Sweden":"SWE","Austria":"AUT",
+  "Tunisia":"TUN","Algeria":"ALG","Egypt":"EGY","Ghana":"GHA","Panama":"PAN","Mexico":"MEX",
+  "Canada":"CAN","Brazil":"BRA","France":"FRA","Spain":"ESP","Japan":"JPN","Iran":"IRN",
+  "Iraq":"IRQ","Qatar":"QAT","Jordan":"JOR","Haiti":"HAI","Curaçao":"CUW","Türkiye":"TUR","USA":"USA"};
+function teamAbbr(name){ return TEAM3[name] || (name||"").slice(0,3).toUpperCase(); }
 
 async function loadProgress(){
   const r = await fetch("/api/progress");

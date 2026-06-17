@@ -171,6 +171,13 @@ def _approved_usernames(conn):
             for r in conn.execute("SELECT id,username FROM users WHERE approved=1")}
 
 
+def _ghost_name_set(conn):
+    """Lowercased display-names of imported teamtip members. Used to drop the
+    duplicate app-user row when the same person is also a teamtip ghost (the
+    ghost carries teamtip's authoritative points, so we keep the ghost)."""
+    return {(m["display_name"] or "").strip().lower() for m in db.get_members(conn)}
+
+
 def _user_match_tips(conn):
     """{user_id: {match_id: (home, away)}}, one tip per user+match (latest wins
     if the user has tips from several providers)."""
@@ -224,9 +231,13 @@ def _rank_rows(rows):
 def _leaderboard(conn, me_id):
     results = _finished_results(conn)
     user_tips = _user_match_tips(conn)
+    ghost_names = _ghost_name_set(conn)
     rows = []
-    # real app users
+    # real app users — skip any whose name duplicates a teamtip ghost (keep the
+    # ghost, which carries teamtip's authoritative points).
     for uid, username in _approved_usernames(conn).items():
+        if (username or "").strip().lower() in ghost_names:
+            continue
         agg = _score_tips(user_tips.get(uid, {}), results)
         rows.append({"kind": "user", "user_id": uid, "username": username,
                      "is_self": uid == me_id, **agg})
@@ -1055,8 +1066,11 @@ def api_matchday(key: str, user=Depends(auth.current_user)):
         return {"name": name, "kind": kind, "is_self": is_self,
                 "cells": cells, "matchday_points": total}
 
+    ghost_names = {(mb["display_name"] or "").strip().lower() for mb in members}
     rows = []
     for uid, uname in usernames.items():
+        if (uname or "").strip().lower() in ghost_names:
+            continue  # dedupe: keep the teamtip ghost, drop the app-user copy
         rows.append(row_for(user_tips.get(uid, {}), uname, "user", uid == user["id"]))
     for mb in members:
         key = (mb["betgame_id"], mb["fk_user"])
