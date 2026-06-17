@@ -3,7 +3,7 @@ name: wc2026
 description: World Cup 2026 team-tip prediction app (FastAPI + SQLite)
 type: application
 # Chart version — bump on every chart change.
-version: 0.2.0
+version: 0.3.0
 # Version of the app this chart deploys (informational).
 appVersion: "1.2.0"
 home: https://github.com/qnib/wc2026
