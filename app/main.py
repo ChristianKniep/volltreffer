@@ -384,7 +384,10 @@ def _state(user_id, provider_id):
 # ---------- routes: pages ----------
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC / "index.html"))
+    # never cache the HTML shell, so a new ?v= for app.js/style.css is always
+    # picked up immediately (the versioned static assets themselves can cache).
+    return FileResponse(str(STATIC / "index.html"),
+                        headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 # ---------- routes: auth ----------
@@ -717,9 +720,18 @@ def providers_save(pid: str, body: dict, user=Depends(auth.current_user)):
                 merged[f.name] = val
         ok, msg = prov.validate(merged)
         db.set_provider_creds(conn, user["id"], pid, merged)
+        # auto-import the teamtip group on a successful connect so members show
+        # up immediately, without needing the separate "Sync group" button.
+        group = None
+        if ok and pid == "teamtip" and hasattr(prov, "sync_group"):
+            try:
+                group = prov.sync_group(conn, user["id"], merged)
+                _snapshot_standings(conn)
+            except Exception as e:  # noqa: BLE001 - never fail the save on sync
+                group = {"errors": [f"group import failed: {e}"]}
     finally:
         conn.close()
-    return {"ok": True, "valid": ok, "message": msg}
+    return {"ok": True, "valid": ok, "message": msg, "group": group}
 
 
 @app.post("/api/providers/{pid}/test")
