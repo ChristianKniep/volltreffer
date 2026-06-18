@@ -119,6 +119,17 @@ CREATE TABLE IF NOT EXISTS standings_snapshots (
   betcount     INTEGER NOT NULL,
   rank         INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS match_goals (
+  match_id   TEXT NOT NULL,
+  seq        INTEGER NOT NULL,       -- 1-based order of the goal within the match
+  minute     INTEGER,               -- match minute (incl. stoppage as e.g. 90); null if unknown
+  side       TEXT NOT NULL,         -- 'home' | 'away' (which team scored)
+  home_run   INTEGER NOT NULL,      -- running home score AFTER this goal
+  away_run   INTEGER NOT NULL,      -- running away score AFTER this goal
+  scorer     TEXT,                  -- optional scorer name
+  source     TEXT,                  -- 'football-data' | 'manual' | 'feed'
+  PRIMARY KEY (match_id, seq)
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -461,3 +472,45 @@ def write_snapshot(conn, matchday, rows):
 def get_snapshots(conn) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT * FROM standings_snapshots ORDER BY matchday,rank")]
+
+
+# ---------- per-match goal events (for the within-game progress view) ----------
+def set_match_goals(conn, match_id, goals, source="manual"):
+    """Replace all goals for a match. `goals` = ordered list of dicts with
+    `side` ('home'|'away'), optional `minute`, optional `scorer`. Running scores
+    are derived from the order. Idempotent: clears then re-inserts."""
+    conn.execute("DELETE FROM match_goals WHERE match_id=?", (match_id,))
+    h = a = 0
+    rows = []
+    for i, g in enumerate(goals, 1):
+        side = g.get("side")
+        if side not in ("home", "away"):
+            continue
+        if side == "home":
+            h += 1
+        else:
+            a += 1
+        rows.append((match_id, i, g.get("minute"), side, h, a,
+                     g.get("scorer"), source))
+    if rows:
+        conn.executemany(
+            """INSERT INTO match_goals(match_id,seq,minute,side,home_run,away_run,
+                 scorer,source) VALUES(?,?,?,?,?,?,?,?)""", rows)
+    conn.commit()
+    return len(rows)
+
+
+def get_match_goals(conn, match_id=None) -> dict:
+    """{match_id: [ {seq,minute,side,home_run,away_run,scorer}, ... ]} ordered."""
+    q = ("SELECT match_id,seq,minute,side,home_run,away_run,scorer FROM match_goals"
+         + (" WHERE match_id=?" if match_id else "") + " ORDER BY match_id,seq")
+    rows = conn.execute(q, (match_id,) if match_id else ()).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(r["match_id"], []).append(dict(r))
+    return out
+
+
+def matches_with_goals(conn) -> set:
+    return {r["match_id"] for r in conn.execute(
+        "SELECT DISTINCT match_id FROM match_goals")}

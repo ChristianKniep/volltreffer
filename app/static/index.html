@@ -6,7 +6,7 @@
 <title>World Cup 2026 · Live Schedule, Predictions &amp; Bracket</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
 <link rel="stylesheet" href="/static/vendor/uPlot.min.css">
-<link rel="stylesheet" href="/static/style.css?v=27">
+<link rel="stylesheet" href="/static/style.css?v=28">
 </head>
 <body>
 <header class="top">
@@ -116,6 +116,9 @@
         <button role="tab" data-gran="day" aria-selected="false">Per day</button>
         <button role="tab" data-gran="round" aria-selected="true">Per round</button>
       </nav>
+      <label class="progwithin" id="progWithinWrap" hidden>
+        <input type="checkbox" id="progWithin"> within game (goal-by-goal)
+      </label>
     </div>
     <div class="chartwrap"><div id="progChart"></div><div class="progtip" id="progTip" hidden></div></div>
     <div class="charlegend" id="progLegend"></div>
@@ -227,6 +230,6 @@ update my prediction for that match. Afterwards, show me the diff.</code></pre>
 <div id="toast"></div>
 <div id="tipPop" class="tippop" hidden></div>
 <script src="/static/vendor/uPlot.iife.min.js"></script>
-<script src="/static/app.js?v=27"></script>
+<script src="/static/app.js?v=28"></script>
 </body>
 </html>

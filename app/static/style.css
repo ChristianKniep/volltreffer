@@ -365,6 +365,8 @@ table.tbl td.pts{font-weight:700}
 
 /* ---------- progress charts ---------- */
 .progbars{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:12px}
+.progwithin{font-family:'Saira Condensed',sans-serif; font-size:13px; color:var(--ink2); display:inline-flex; gap:5px; align-items:center; cursor:pointer}
+.progtip .prov{font-size:9px; font-weight:700; color:#fff; background:#d4711b; border-radius:4px; padding:0 4px; text-transform:uppercase}
 
 .chartwrap{position:relative; background:var(--tile); border:1px solid var(--line); border-radius:12px; padding:10px}
 #progChart{max-width:100%; display:block}

@@ -868,6 +868,47 @@ def api_result(mid: str, r: Result, user=Depends(auth.current_user)):
     return {"ok": True}
 
 
+class GoalsBody(BaseModel):
+    # ordered list of goals; each: {"side":"home"|"away","minute":int?,"scorer":str?}
+    goals: list[dict]
+
+
+@app.get("/api/match/{mid}/goals")
+def api_get_goals(mid: str, user=Depends(auth.current_user)):
+    conn = db.connect()
+    try:
+        return {"match_id": mid, "goals": db.get_match_goals(conn, mid).get(mid, [])}
+    finally:
+        conn.close()
+
+
+@app.put("/api/match/{mid}/goals")
+def api_set_goals(mid: str, body: GoalsBody, admin=Depends(auth.require_admin)):
+    """Manually set the goal timeline for a match (admin). Running scores are
+    derived from order. Replaces any existing goals for the match."""
+    conn = db.connect()
+    try:
+        if not conn.execute("SELECT 1 FROM matches WHERE id=?", (mid,)).fetchone():
+            raise HTTPException(404, f"match {mid} not found")
+        for g in body.goals:
+            if g.get("side") not in ("home", "away"):
+                raise HTTPException(400, "each goal needs side='home' or 'away'")
+        n = db.set_match_goals(conn, mid, body.goals, source="manual")
+    finally:
+        conn.close()
+    return {"ok": True, "match_id": mid, "goals_stored": n}
+
+
+@app.delete("/api/match/{mid}/goals")
+def api_clear_goals(mid: str, admin=Depends(auth.require_admin)):
+    conn = db.connect()
+    try:
+        db.set_match_goals(conn, mid, [], source="manual")
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 class Tip(BaseModel):
     home: int
     away: int
@@ -1002,17 +1043,125 @@ def _progress_steps(conn, granularity):
             for k in sorted(buckets, key=lambda k: order[k][0])]
 
 
+def _progress_within(view):
+    """Per-match progress expanded to goal sub-steps with PROVISIONAL scoring.
+    For each finished match (in kickoff order): emit a 0-0 kickoff sub-step then
+    one sub-step per goal. A subject's points at a sub-step = (their settled total
+    from all earlier finished matches) + (provisional points for THIS match scored
+    against the current running scoreline). Matches with no goal data still get a
+    single sub-step at their final score (so the series stays continuous)."""
+    conn = db.connect()
+    try:
+        subjects = _progress_subjects(conn, view)
+        results = _finished_results(conn)
+        goals_by_match = db.get_match_goals(conn)
+        fin = [dict(r) for r in conn.execute(
+            "SELECT id,kickoff_et,home_team,away_team,home_ref,away_ref FROM matches "
+            "WHERE status='finished' ORDER BY kickoff_et, match_no")]
+    finally:
+        conn.close()
+
+    names = {sid: s["name"] for sid, s in subjects.items()}
+    settled = {sid: {"points": 0, "exact": 0, "goaldiff": 0, "tendency": 0}
+               for sid in subjects}  # totals from matches already fully counted
+    series = {sid: {"subject_id": sid, "name": s["name"], "kind": s["kind"],
+                    "points": [], "rank": []}
+              for sid, s in subjects.items()}
+    step_meta = []
+    any_goals = False
+
+    def provisional(sid, mid, hr, ar):
+        """points the subject would get for `mid` at running score hr-ar."""
+        t = subjects[sid]["tips"].get(mid)
+        if not t:
+            return 0
+        cls = SC.classify(t[0], t[1], hr, ar)
+        return SC.POINTS[cls]
+
+    def emit(label, home, away, mid, hr, ar, kind):
+        # cumulative = settled totals + provisional for this match at hr-ar
+        cur = {}
+        for sid in subjects:
+            cur[sid] = {**settled[sid]}
+            cur[sid]["points"] = settled[sid]["points"] + provisional(sid, mid, hr, ar)
+        ranks = _rank_after(subjects, cur, names)
+        for sid in subjects:
+            series[sid]["points"].append(cur[sid]["points"])
+            series[sid]["rank"].append(ranks[sid])
+        step_meta.append({"key": f"{mid}@{label}", "label": label,
+                          "home": home, "away": away, "score": f"{hr}-{ar}",
+                          "minute": label if kind == "goal" else None,
+                          "match_id": mid, "kind": kind})
+
+    for m in fin:
+        mid = m["id"]
+        if mid not in results:
+            continue
+        h = m["home_team"] or m["home_ref"]
+        a = m["away_team"] or m["away_ref"]
+        goals = goals_by_match.get(mid)
+        if goals:
+            any_goals = True
+            emit("0'", h, a, mid, 0, 0, "kickoff")
+            for g in goals:
+                lbl = (f"{g['minute']}'" if g["minute"] is not None else f"#{g['seq']}")
+                emit(lbl, h, a, mid, g["home_run"], g["away_run"], "goal")
+        else:
+            # no goal data → single final sub-step
+            rh, ra = results[mid]
+            emit("FT", h, a, mid, rh, ra, "final")
+        # settle this match into the running totals (using the FINAL result)
+        rh, ra = results[mid]
+        for sid in subjects:
+            t = subjects[sid]["tips"].get(mid)
+            if not t:
+                continue
+            cls = SC.classify(t[0], t[1], rh, ra)
+            if cls == "miss":
+                continue
+            settled[sid][cls] += 1
+            settled[sid]["points"] += SC.POINTS[cls]
+
+    return {"granularity": "match", "view": view, "within": True,
+            "any_goals": any_goals, "steps": step_meta,
+            "series": list(series.values()), "scheme": SC.scheme()}
+
+
+def _rank_after(subjects, cum, names):
+    """Standard competition ranking (ties share a rank) over current cumulative."""
+    ordered = sorted(subjects, key=lambda sid: (
+        -cum[sid]["points"], -cum[sid]["exact"], -cum[sid]["goaldiff"],
+        -cum[sid]["tendency"], names[sid].lower()))
+    out = {}
+    rank = 0
+    prev = None
+    for i, sid in enumerate(ordered, 1):
+        c = cum[sid]
+        keyv = (c["points"], c["exact"], c["goaldiff"], c["tendency"])
+        if keyv != prev:
+            rank = i
+            prev = keyv
+        out[sid] = rank
+    return out
+
+
 @app.get("/api/progress")
 def api_progress(view: str = "ghosts", granularity: str = "round",
-                 user=Depends(auth.current_user)):
+                 within: int = 0, user=Depends(auth.current_user)):
     """Cumulative standings over time, computed deterministically from tips +
     results (no reliance on click-time snapshots). `granularity` ∈ match|day|round,
     `view` ∈ ghosts|local|both. For each step returns every subject's cumulative
-    points & rank plus the per-step gains broken into exact/goaldiff/tendency."""
+    points & rank plus the per-step gains broken into exact/goaldiff/tendency.
+
+    `within=1` (only meaningful with granularity=match) expands each match that has
+    goal events into goal-by-goal sub-steps, with PROVISIONAL points (tip scored
+    against the running scoreline as if the game froze there)."""
     if view not in ACCOUNT_VIEWS:
         view = "both"
     if granularity not in ("match", "day", "round"):
         granularity = "round"
+    if within and granularity == "match":
+        return _progress_within(view)
     conn = db.connect()
     try:
         subjects = _progress_subjects(conn, view)

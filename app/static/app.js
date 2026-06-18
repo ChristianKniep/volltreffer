@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v27";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v28";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -659,6 +659,7 @@ async function loadLeaderboard(){
 /* ---------- progress chart: cumulative points over time (uPlot) ---------- */
 let PROG_DATA = null;        // {granularity, view, steps, series, scheme}
 let PROG_GRAN = localStorage.getItem("wc_prog_gran") || "round";
+let PROG_WITHIN = localStorage.getItem("wc_prog_within") === "1";
 let PROG_HIDDEN = new Set();
 let uplot = null;            // current uPlot instance
 const PROG_COLORS = ["#C8102E","#0E7C7B","#1F6FB2","#E0561F","#6A359C","#2E8B57",
@@ -745,7 +746,9 @@ function progColor(i){ return PROG_COLORS[i % PROG_COLORS.length]; }
 function progSeriesColor(s, i){ return s.kind==="user" ? "#111" : progColor(i); }
 
 async function loadProgress(){
-  const r = await fetch(`/api/progress?view=${encodeURIComponent(ACCOUNT_VIEW)}&granularity=${encodeURIComponent(PROG_GRAN)}`);
+  // the "within game" toggle only applies to per-match
+  const within = (PROG_GRAN==="match" && PROG_WITHIN) ? "&within=1" : "";
+  const r = await fetch(`/api/progress?view=${encodeURIComponent(ACCOUNT_VIEW)}&granularity=${encodeURIComponent(PROG_GRAN)}${within}`);
   if(!r.ok) return;
   PROG_DATA = await r.json();
   const empty = !PROG_DATA.steps.length;
@@ -753,9 +756,18 @@ async function loadProgress(){
   document.getElementById("progChart").style.display = empty ? "none" : "";
   document.getElementById("progGran").querySelectorAll("button").forEach(b=>
     b.setAttribute("aria-selected", b.dataset.gran===PROG_GRAN));
+  // show the within-game toggle only in per-match
+  const ww = document.getElementById("progWithinWrap");
+  ww.hidden = PROG_GRAN!=="match";
+  document.getElementById("progWithin").checked = PROG_WITHIN;
   if(empty){ document.getElementById("progLegend").innerHTML=""; if(uplot){uplot.destroy(); uplot=null;} return; }
   renderProgLegend();
   drawProgress();
+  // note when within-game requested but no goal data exists
+  const note = document.getElementById("progEmpty");
+  if(PROG_DATA.within && !PROG_DATA.any_goals){
+    note.hidden=false; note.textContent="No goal timestamps yet — within-game view shows final scores only. Add goals via Update results (football-data.org) or the admin goal editor.";
+  }
 }
 
 function renderProgLegend(){
@@ -789,8 +801,9 @@ function drawProgress(){
   const labels = PROG_DATA.steps.map(s=>s.label);
   const sz = chartSize();
 
-  // per-match steps get a stacked 3-letter label (GER / vs / ENG); others a short text
-  const perMatch = PROG_DATA.granularity === "match";
+  const within = !!PROG_DATA.within;
+  // per-match (final) gets stacked team codes; within-game gets running scores
+  const perMatch = PROG_DATA.granularity === "match" && !within;
   const data = [xs];
   const series = [{}];
   PROG_DATA.series.forEach((s,i)=>{
@@ -798,33 +811,64 @@ function drawProgress(){
     series.push({
       label: s.name, stroke: progSeriesColor(s,i),
       width: s.kind==="user"?3:1.6,
-      points:{show:true, size:4},
+      points:{show:true, size: within?3:4},
       show: !PROG_HIDDEN.has(s.subject_id),
     });
   });
   const steps = PROG_DATA.steps;
+  let xAxis;
+  if(perMatch){
+    // hide default x text — stacked team codes drawn in the draw hook
+    xAxis = { size:46, grid:{show:false}, values:()=>[], ticks:{show:true} };
+  } else if(within){
+    // running scoreline per sub-step (e.g. 1-0); match bands drawn in hook
+    xAxis = { size:40, grid:{show:false}, rotate:-90,
+      values:(u,vals)=>vals.map(v=>steps[v]?steps[v].score:"") };
+  } else {
+    xAxis = { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} };
+  }
   const opts = {
     ...sz,
     scales:{ x:{time:false}, y:{} },
-    axes:[
-      perMatch
-        // hide default x text — we draw stacked team codes in the draw hook
-        ? { size:46, grid:{show:false}, values:()=>[], ticks:{show:true} }
-        : { values:(u,vals)=>vals.map(v=>labels[v]!==undefined?shortLabel(labels[v]):""), rotate:-30, size:60, grid:{show:false} },
-      { label: "cumulative points" },
-    ],
+    axes:[ xAxis, { label: within ? "points (provisional)" : "cumulative points" } ],
     legend:{show:false},
     cursor:{ focus:{prox:24}, points:{size:7} },
     hooks:{
       setCursor:[u=>showProgTip(u, labels)],
-      // round bands draw first (behind series via drawClear), labels after
-      drawClear: perMatch ? [u=>drawRoundBands(u, steps)] : [],
+      drawClear: perMatch ? [u=>drawRoundBands(u, steps)]
+                : within ? [u=>drawMatchBands(u, steps)] : [],
       draw: perMatch ? [u=>drawStackedXLabels(u, steps)] : [],
     },
     series,
   };
   uplot = new uPlot(opts, data, el);
   el.onmouseleave = ()=>{ document.getElementById("progTip").hidden=true; };
+}
+
+// within-game: shade alternating MATCH groups + label each with team codes
+function drawMatchBands(u, steps){
+  if(!steps.length) return;
+  const ctx = u.ctx;
+  const runs = [];
+  let start = 0;
+  for(let i=1;i<=steps.length;i++){
+    if(i===steps.length || steps[i].match_id!==steps[start].match_id){
+      runs.push({a:start, b:i-1, home:steps[start].home, away:steps[start].away}); start=i;
+    }
+  }
+  ctx.save();
+  const top=u.bbox.top, bot=u.bbox.top+u.bbox.height;
+  const half=i=>u.valToPos(i,"x",true);
+  runs.forEach((r,ri)=>{
+    const lx = r.a===0 ? u.bbox.left : (half(r.a-1)+half(r.a))/2;
+    const rx = r.b===steps.length-1 ? u.bbox.left+u.bbox.width : (half(r.b)+half(r.b+1))/2;
+    if(ri%2===1){ ctx.fillStyle="rgba(0,0,0,0.035)"; ctx.fillRect(lx,top,rx-lx,bot-top); }
+    if(r.a>0){ ctx.strokeStyle="rgba(0,0,0,0.12)"; ctx.beginPath(); ctx.moveTo(lx,top); ctx.lineTo(lx,bot); ctx.stroke(); }
+    ctx.font="700 9px 'Saira Condensed',system-ui,sans-serif";
+    ctx.fillStyle="#8a8170"; ctx.textAlign="center"; ctx.textBaseline="top";
+    ctx.fillText(`${teamAbbr(r.home||"")}-${teamAbbr(r.away||"")}`, (lx+rx)/2, top+2);
+  });
+  ctx.restore();
 }
 
 // shade alternating round groups behind the chart + label each round (per-match)
@@ -889,18 +933,23 @@ function showProgTip(u, labels){
   const tip = document.getElementById("progTip");
   const idx = u.cursor.idx;
   if(idx==null){ tip.hidden=true; return; }
+  const within = !!PROG_DATA.within;
+  const st = PROG_DATA.steps[idx] || {};
   const rows = PROG_DATA.series.map((s,i)=>({
     name:s.name, kind:s.kind, color:progSeriesColor(s,i),
-    pts:s.points[idx], rank:s.rank[idx], gain:s.gains[idx],
+    pts:s.points[idx], rank:(s.rank?s.rank[idx]:0), gain:(s.gains?s.gains[idx]:null),
   })).sort((a,b)=> a.rank-b.rank || b.pts-a.pts);
   const body = rows.map(r=>`<div class="ptrow ${r.kind}">
     <span class="ptrk">${r.rank}</span>
     <span class="ptsw" style="background:${r.color}"></span>
     <span class="ptnm">${fmtEl(r.name)}</span>
     <span class="ptpt">${r.pts}</span>
-    ${r.gain && r.gain.points ? `<span class="ptgain">+${r.gain.points}</span>`:`<span class="ptgain z">·</span>`}
+    ${(!within && r.gain && r.gain.points) ? `<span class="ptgain">+${r.gain.points}</span>`:`<span class="ptgain z">·</span>`}
   </div>`).join("");
-  tip.innerHTML = `<div class="pthead">${fmtEl(labels[idx])}</div>
+  const head = within
+    ? `${fmtEl(teamAbbr(st.home||""))} ${st.score||""} ${fmtEl(teamAbbr(st.away||""))} · ${fmtEl(st.label||"")} <span class="prov">provisional</span>`
+    : fmtEl(labels[idx]);
+  tip.innerHTML = `<div class="pthead">${head}</div>
     <div class="ptcols"><span></span><span></span><span>player</span><span>pts</span><span>Δ</span></div>${body}`;
   placeProgTip(u, tip);
 }
@@ -995,6 +1044,11 @@ document.querySelectorAll("#progGran button").forEach(b=>{
     loadProgress();
   };
 });
+document.getElementById("progWithin").onchange = (e)=>{
+  PROG_WITHIN = e.target.checked;
+  localStorage.setItem("wc_prog_within", PROG_WITHIN ? "1" : "0");
+  loadProgress();
+};
 document.getElementById("updateBtn").onclick = runUpdate;
 document.getElementById("appVer").textContent = APP_VERSION;
 

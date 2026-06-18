@@ -103,7 +103,7 @@ def _http(url, headers=None):
 
 
 def _fetch_football_data(conn, token):
-    out = {"updated": 0, "skipped": 0, "errors": []}
+    out = {"updated": 0, "skipped": 0, "goals": 0, "errors": []}
     raw = _http("https://api.football-data.org/v4/competitions/WC/matches",
                 headers={"X-Auth-Token": token})
     payload = json.loads(raw)
@@ -128,6 +128,42 @@ def _fetch_football_data(conn, token):
             if _finish(conn, mid, ft["home"], ft["away"],
                        pens.get("home"), pens.get("away")):
                 out["updated"] += 1
+                # best-effort: pull goal events for the within-game view
+                try:
+                    g = _fetch_match_goals(conn, token, fx.get("id"), mid,
+                                           _canon(ht), _canon(at))
+                    out["goals"] += g
+                except Exception as e:  # noqa: BLE001 - goals are optional
+                    out["errors"].append(f"goals {mid}: {type(e).__name__}")
         else:
             out["skipped"] += 1
     return out
+
+
+def _fetch_match_goals(conn, token, fd_match_id, mid, home_canon, away_canon):
+    """Fetch a single match's goal events from football-data and store them.
+    Only persists if the feed actually exposes goals[] with minutes (paid tiers);
+    otherwise leaves any existing/manual goals untouched."""
+    from . import db
+    if not fd_match_id:
+        return 0
+    raw = _http(f"https://api.football-data.org/v4/matches/{fd_match_id}",
+                headers={"X-Auth-Token": token})
+    detail = json.loads(raw)
+    home_name = _canon(detail.get("homeTeam", {}).get("name"))
+    events = detail.get("goals") or []
+    parsed = []
+    for ev in events:
+        team = _canon((ev.get("team") or {}).get("name"))
+        side = "home" if team == home_name else "away"
+        minute = ev.get("minute")
+        if isinstance(minute, str):
+            try:
+                minute = int(minute.split("+")[0])
+            except ValueError:
+                minute = None
+        scorer = (ev.get("scorer") or {}).get("name")
+        parsed.append({"side": side, "minute": minute, "scorer": scorer})
+    if not parsed:
+        return 0  # tier doesn't expose goals — don't clobber manual data
+    return db.set_match_goals(conn, mid, parsed, source="football-data")
