@@ -1,5 +1,5 @@
 "use strict";
-const APP_VERSION = "v28";   // bump together with the ?v= cache-bust in index.html
+const APP_VERSION = "v29";   // bump together with the ?v= cache-bust in index.html
 const HEAT = {5:'#B3122B',4:'#E0561F',3:'#E59020',2:'#C7A63C',1:'#9B9082'};
 const GROUP_ORDER = "ABCDEFGHIJKL".split("");
 const ROUND_LABEL = {R32:"Round of 32",R16:"Round of 16",QF:"Quarter-finals",SF:"Semi-finals",FINAL:"Final","3RD":"Third place"};
@@ -42,8 +42,14 @@ async function runUpdate(){
     o.synced ? `${pid}: ${o.synced} synced` : (o.errors&&o.errors.length ? `${pid}: ${o.errors[0]}` : "")
   ).filter(Boolean);
   const provMsg = parts.length ? " · " + parts.join(" · ") : "";
-  if(s.errors && s.errors.length) toast(s.errors[0] + provMsg);
-  else toast(`${s.source}: ${s.updated} updated, ${s.skipped} skipped${provMsg}`);
+  const goalMsg = s.goals ? ` · ${s.goals} goals` : "";
+  if(s.rate_limited){
+    toast(`${s.updated} results saved. Rate-limited: ${s.goals_pending||0} match(es) still need goal data — click Update again in a minute.`);
+  } else if(s.errors && s.errors.length){
+    toast(s.errors[0] + provMsg);
+  } else {
+    toast(`${s.source}: ${s.updated} updated, ${s.skipped} skipped${goalMsg}${provMsg}`);
+  }
   await getState();
 }
 

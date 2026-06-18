@@ -13,6 +13,7 @@ After any change we re-run resolve() so knockout slots advance.
 import datetime
 import json
 import os
+import urllib.error
 import urllib.request
 
 from . import resolve as R
@@ -102,8 +103,13 @@ def _http(url, headers=None):
         return resp.read().decode("utf-8")
 
 
+def _is_429(exc):
+    return isinstance(exc, urllib.error.HTTPError) and exc.code == 429
+
+
 def _fetch_football_data(conn, token):
-    out = {"updated": 0, "skipped": 0, "goals": 0, "errors": []}
+    out = {"updated": 0, "skipped": 0, "goals": 0, "goals_pending": 0,
+           "rate_limited": False, "errors": []}
     raw = _http("https://api.football-data.org/v4/competitions/WC/matches",
                 headers={"X-Auth-Token": token})
     payload = json.loads(raw)
@@ -115,6 +121,11 @@ def _fetch_football_data(conn, token):
         d = m["kickoff_et"][:10]
         key = (d, frozenset((_canon(m["home_team"]), _canon(m["away_team"]))))
         idx[key] = m["id"]
+    # matches whose goal timeline we already have -> never re-fetch (idempotent,
+    # keeps us well under football-data's free 10 req/min limit on re-runs)
+    from . import db
+    have_goals = db.matches_with_goals(conn)
+    stop_goals = False   # set once we hit a 429; skip remaining goal-pulls
     for fx in payload.get("matches", []):
         if fx.get("status") != "FINISHED":
             continue
@@ -128,15 +139,31 @@ def _fetch_football_data(conn, token):
             if _finish(conn, mid, ft["home"], ft["away"],
                        pens.get("home"), pens.get("away")):
                 out["updated"] += 1
-                # best-effort: pull goal events for the within-game view
-                try:
-                    g = _fetch_match_goals(conn, token, fx.get("id"), mid,
-                                           _canon(ht), _canon(at))
-                    out["goals"] += g
-                except Exception as e:  # noqa: BLE001 - goals are optional
+            # goals: skip if we already have them, or if we've been rate-limited
+            if mid in have_goals:
+                continue
+            if stop_goals:
+                out["goals_pending"] += 1
+                continue
+            try:
+                g = _fetch_match_goals(conn, token, fx.get("id"), mid,
+                                       _canon(ht), _canon(at))
+                out["goals"] += g
+            except Exception as e:  # noqa: BLE001 - goals are optional
+                if _is_429(e):
+                    # back off: stop pulling goals this run, resume on the next
+                    stop_goals = True
+                    out["rate_limited"] = True
+                    out["goals_pending"] += 1
+                else:
                     out["errors"].append(f"goals {mid}: {type(e).__name__}")
         else:
             out["skipped"] += 1
+    if out["rate_limited"]:
+        out["errors"].append(
+            f"football-data rate limit hit — {out['goals_pending']} match(es) "
+            "still need goal timelines. Scores are saved; click Update again "
+            "in a minute to fetch the rest.")
     return out
 
 
