@@ -2,9 +2,8 @@ services:
   wc2026:
     build: .
     image: wc2026
-    container_name: wc2026
     ports:
-      - "8000:8000"
+      - "8008:8000"
     environment:
       WC_DB: /data/wc2026.db
       # --- REQUIRED in production: encrypts every stored betting credential ---
