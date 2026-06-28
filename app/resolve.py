@@ -5,16 +5,35 @@ matches, fills the Round-of-32 from group winners / runners-up / best third
 placers, and propagates knockout winners up the bracket. Call it after any
 result change.
 
-Third-place assignment: FIFA uses a fixed combination table keyed on *which*
-eight of the twelve third-placed teams qualify. We approximate it with a
-deterministic greedy fill - each "Best 3rd" slot lists the groups it may draw
-from, and we assign the highest-ranked qualified third from an allowed group.
-The slot's allowed-group list is the official one, so the result is always
-valid; only the exact pairing can differ from FIFA's table.
+Third-place assignment: FIFA uses a fixed combination table (Annex C of the
+tournament regulations) keyed on *which* eight of the twelve third-placed teams
+qualify - the 495 possible combinations each map the eight "Best 3rd" slots to a
+specific group. We encode that table in data/third_place_combinations.json and
+look up the row for the qualifying set, so the pairings match FIFA exactly. If a
+combination is somehow missing we fall back to a greedy legal matching (each
+"Best 3rd" slot's allowed-group list still guarantees a valid assignment).
 """
+import json
+import os
 import re
 
 GROUPS = list("ABCDEFGHIJKL")
+
+_COMBINATIONS = None
+
+
+def _load_combinations():
+    """Lazy-load the official Annex C third-place combination table."""
+    global _COMBINATIONS
+    if _COMBINATIONS is None:
+        path = os.path.join(os.path.dirname(__file__),
+                            "data", "third_place_combinations.json")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                _COMBINATIONS = json.load(fh)
+        except (OSError, ValueError):
+            _COMBINATIONS = {}
+    return _COMBINATIONS
 
 
 def _team_rating(conn, name):
@@ -99,7 +118,35 @@ def _best_thirds(conn):
 
 
 def _assign_thirds(conn):
-    """Assign the eight best third-placed teams to the eight 'Best 3rd X/Y/..'
+    """Assign the eight best third-placed teams to the eight 'Best 3rd' R32
+    slots using FIFA's official Annex C combination table, keyed on the set of
+    eight groups whose third-placed team qualified. Each 'Best 3rd' slot sits
+    opposite a 'Winner X' slot; the table says exactly which third-place group
+    that winner faces. Falls back to the greedy matcher if the combination is
+    not found."""
+    best = _best_thirds(conn)
+    if best is None:
+        return {}
+    by_group = {t["group"]: t["team"] for t in best}
+    combo = _load_combinations().get("".join(sorted(by_group)))
+    if combo:
+        assignment = {}
+        for s in conn.execute(
+                "SELECT id,home_ref,away_ref FROM matches WHERE round='R32' ORDER BY match_no"):
+            for side, ref, other in (("home", s["home_ref"], s["away_ref"]),
+                                     ("away", s["away_ref"], s["home_ref"])):
+                if (ref or "").startswith("Best 3rd"):
+                    wm = re.match(r"Winner ([A-L])$", other or "")
+                    third_group = combo.get(wm.group(1)) if wm else None
+                    if third_group in by_group:
+                        assignment[(s["id"], side)] = by_group[third_group]
+        if len(assignment) == 8:
+            return assignment
+    return _assign_thirds_greedy(conn)
+
+
+def _assign_thirds_greedy(conn):
+    """Fallback: assign the eight best third-placed teams to the 'Best 3rd X/Y/..'
     R32 slots via a backtracking perfect matching that always respects each
     slot's allowed-group list (greedy could dead-end and leave a slot empty)."""
     best = _best_thirds(conn)
