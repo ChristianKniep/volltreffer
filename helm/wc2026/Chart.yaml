@@ -3,7 +3,7 @@ name: wc2026
 description: World Cup 2026 team-tip prediction app (FastAPI + SQLite)
 type: application
 # Chart version — bump on every release so Flux re-packages and upgrades.
-version: 0.8.2
+version: 0.8.3
 # Version of the app this chart deploys (informational).
 appVersion: "1.7.3"
 home: https://github.com/qnib/wc2026
