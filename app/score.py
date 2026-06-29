@@ -10,10 +10,12 @@ own ranking. Point values are overridable via env:
 
 Precedence is exact > goaldiff > tendency > miss.
 
-NB: for imported teamtip ghost members the leaderboard uses teamtip's *own*
-points_total (stored on teamtip_members) as the source of truth — see main.py.
-This scheme is what we apply to native app users' tips so they score on the same
-basis. Keep the two aligned (or override SCORE_* to match a different betgame).
+NB: this same scheme scores everyone on the leaderboard — native app users and
+imported teamtip ghost members alike (see _leaderboard in main.py). teamtip's
+cached points_total is used only as a cross-check/fallback; when it disagrees
+with our own computation it has lagged teamtip's ranking (e.g. a corrected
+result), so we trust the computed total. Override SCORE_* for a different
+betgame (one with extra bonus points would need a ranking re-sync instead).
 """
 import os
 

@@ -252,17 +252,25 @@ def _leaderboard(conn, me_id, view="both"):
             agg = _score_tips(user_tips.get(uid, {}), results)
             rows.append({"kind": "user", "user_id": uid, "username": username,
                          "is_self": uid == me_id, **agg})
-    # teamtip ghost members (read-only, imported from the betgame).
-    # Prefer teamtip's OWN ranking numbers (source of truth) so our leaderboard
-    # matches teamtip exactly; fall back to recomputing if they weren't synced.
+    # teamtip ghost members (read-only, imported from the betgame). We score
+    # their imported tips ourselves with the same scheme as the progress graph,
+    # so the board stays correct (and consistent with /api/progress) when a
+    # result is corrected. teamtip's cached ranking total (tt_points) is trusted
+    # only when it AGREES with our live computation, or when we have none of the
+    # member's tips to score; if it disagrees it has lagged teamtip's own ranking
+    # (e.g. after a corrected scoreline) and our recomputed total is the current
+    # one. NB: assumes the betgame scores purely via SCORE_*; a betgame with
+    # extra bonus points would need a fresh ranking sync rather than this path.
     if view in ("ghosts", "both"):
         member_tips = db.get_member_tips(conn)
         for m in db.get_members(conn):
             key = (m["betgame_id"], m["fk_user"])
             agg = _score_tips(member_tips.get(key, {}), results)
-            if m.get("tt_points") is not None:
+            tt = m.get("tt_points")
+            use_cache = tt is not None and (agg["tips"] == 0 or tt == agg["points"])
+            if use_cache:
                 agg = {**agg,
-                       "points": m["tt_points"],
+                       "points": tt,
                        "exact": m["tt_exact"] if m.get("tt_exact") is not None else agg["exact"],
                        "goaldiff": m["tt_goaldiff"] if m.get("tt_goaldiff") is not None else agg["goaldiff"],
                        "tendency": m["tt_tendency"] if m.get("tt_tendency") is not None else agg["tendency"],
